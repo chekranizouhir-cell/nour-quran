@@ -1,0 +1,109 @@
+﻿<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nour Quran - نور القرآن</title>
+<link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Poppins:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Amiri', serif; background:#000; color:#fff; overflow:hidden; height:100vh;}
+  #bg-video{position:fixed; top:0; left:0; width:100%; height:100%; object-fit:cover; z-index:-2; filter:brightness(0.5);}
+ .overlay{position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); z-index:-1;}
+ .container{height:100vh; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; padding:20px; max-width:900px; margin:auto;}
+ .ayah-ar{font-size:2.8rem; line-height:1.8; margin-bottom:25px; text-shadow:0 2px 10px #000;}
+ .ayah-en{font-family:'Poppins', sans-serif; font-size:1.2rem; opacity:0.9; line-height:1.6; direction:ltr; max-width:700px; background:rgba(255,255,255,0.1); padding:15px 20px; border-radius:12px; backdrop-filter:blur(10px);}
+ .info{margin-top:20px; font-family:'Poppins'; opacity:0.7;}
+ .btn{margin-top:30px; padding:12px 30px; border:1px solid #fff; background:transparent; color:#fff; border-radius:30px; cursor:pointer; font-family:'Poppins'; transition:0.3s;}
+ .btn:hover{background:#fff; color:#000;}
+ .status{margin-top:18px; font-family:'Poppins'; font-size:0.8rem; opacity:0.8;}
+ audio{width:min(420px, 80vw); margin-top:18px; border-radius:12px; filter:drop-shadow(0 0 12px rgba(0,0,0,0.3)); display:none;}
+</style>
+</head>
+<body>
+
+<video id="bg-video" autoplay loop playsinline>
+  <source src="https://videos.pexels.com/video-files/18069234/18069234-uhd_1440_1440_24fps.mp4" type="video/mp4">
+</video>
+<div class="overlay"></div>
+
+<div class="container">
+  <h2 id="surah-name" class="info">سورة البقرة - الآية 1</h2>
+  <h1 id="arabic" class="ayah-ar">بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ</h1>
+  <p id="english" class="ayah-en">In the name of Allah, the Most Gracious, the Most Merciful.</p>
+  <audio id="quran-audio" controls preload="auto" crossorigin="anonymous"></audio>
+  <div id="status" class="status">يتم تشغيل الآية الحالية...</div>
+  <button class="btn" onclick="loadNewAyah()">آية جديدة + تشغيل الآية ✨</button>
+</div>
+
+<script>
+const videos = {
+  sea: "https://videos.pexels.com/video-files/1409899/1409899-uhd_2560_1440_30fps.mp4",
+  sky: "https://videos.pexels.com/video-files/18069234/18069234-uhd_1440_1440_24fps.mp4",
+  mountain: "https://videos.pexels.com/video-files/2169880/2169880-uhd_2560_1440_30fps.mp4",
+  night: "https://videos.pexels.com/video-files/18069195/18069195-uhd_1440_1440_24fps.mp4",
+  desert: "https://videos.pexels.com/video-files/4124024/4124024-uhd_2560_1440_30fps.mp4"
+};
+
+const audioEl = document.getElementById('quran-audio');
+const statusEl = document.getElementById('status');
+
+function speakAyah(text) {
+  if (!('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel();
+  const cleanText = text.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+  const utterance = new SpeechSynthesisUtterance(cleanText);
+  utterance.lang = 'ar-SA';
+  utterance.rate = 0.88;
+  utterance.pitch = 1;
+  utterance.onstart = () => {
+    statusEl.textContent = 'يتم الآن تلاوة الآية الحالية...';
+  };
+  utterance.onend = () => {
+    statusEl.textContent = 'تمت مزامنة الآية مع الصوت.';
+  };
+  window.speechSynthesis.speak(utterance);
+}
+
+async function loadNewAyah(){
+  try{
+    const randomAyah = Math.floor(Math.random()*6236)+1;
+    const resAr = await fetch(`https://api.alquran.cloud/v1/ayah/${randomAyah}/ar.alafasy`);
+    const dataAr = await resAr.json();
+    const resEn = await fetch(`https://api.alquran.cloud/v1/ayah/${randomAyah}/en.sahih`);
+    const dataEn = await resEn.json();
+
+    const arabicText = dataAr.data.text.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+    document.getElementById('arabic').innerText = arabicText;
+    document.getElementById('english').innerText = dataEn.data.text;
+    document.getElementById('surah-name').innerText = `${dataAr.data.surah.name} - الآية ${dataAr.data.numberInSurah}`;
+
+    const text = dataEn.data.text.toLowerCase();
+    let videoKey = 'sky';
+    if(text.includes('sea') || text.includes('water') || text.includes('ocean')) videoKey = 'sea';
+    else if(text.includes('mountain')) videoKey = 'mountain';
+    else if(text.includes('night') || text.includes('darkness')) videoKey = 'night';
+    else if(text.includes('earth') || text.includes('land')) videoKey = 'desert';
+
+    const videoEl = document.getElementById('bg-video');
+    videoEl.src = videos[videoKey];
+    videoEl.volume = 0.7;
+    videoEl.muted = false;
+    videoEl.play();
+
+    // Audio sync fix: read the exact verse text that is displayed, not an unrelated surah file.
+    audioEl.pause();
+    audioEl.removeAttribute('src');
+    audioEl.load();
+    speakAyah(arabicText);
+
+  }catch(e){
+    console.log(e);
+    statusEl.textContent = 'حدثت مشكلة في جلب الآية؛ حاول مرة أخرى.';
+  }
+}
+
+loadNewAyah();
+</script>
+</body>
+</html>
