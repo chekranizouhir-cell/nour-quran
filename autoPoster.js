@@ -295,3 +295,45 @@ module.exports = {
   isYoutubeConfigured,
   scheduleCrons: Object.keys(SCHEDULE_CRONS)
 };
+// هذا هو اللي غادي يخلي GitHub Actions يخدم
+const SCHEDULE_CRONS = {
+  '0 5 * * *': '08:00',   // 08:00 Asia/Riyadh
+  '0 12 * * *': '15:00',  // 15:00 Asia/Riyadh  
+  '0 15 * * *': '18:00',  // 18:00 Asia/Riyadh
+  '0 21 * * *': '00:00'   // 00:00 Asia/Riyadh
+};
+
+const VIDEO_TYPES = [
+  { key: '1ayah', count: 1 },
+  { key: '2ayah', count: 2 },
+  { key: '3ayah', count: 3 },
+  { key: '7ayah', count: 7 }
+];
+
+if (require.main === module) {
+  (async () => {
+    try {
+      // كيحدد شحال من آية على حسب الوقت ديال السعودية
+      const now = new Date();
+      // تقدر تاخد الوقت من GitHub cron ولا من الوقت الحالي
+      let cronKey = Object.keys(SCHEDULE_CRONS)[0];
+      const riyadhHour = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Riyadh', hour: '2-digit', hourCycle: 'h23' }).format(now);
+      
+      if (riyadhHour === '08') cronKey = '0 5 * * *';
+      else if (riyadhHour === '15') cronKey = '0 12 * * *';
+      else if (riyadhHour === '18') cronKey = '0 15 * * *';
+      else cronKey = '0 21 * * *';
+
+      const videoType = getDailyVideoType(cronKey, now);
+      console.log(`الوقت: ${videoType.time} - النوع: ${videoType.key} - ${videoType.count || ''} آيات`);
+
+      const ayahCount = videoType.count || VIDEO_TYPES.find(t => t.key === videoType.key)?.count || 1;
+      
+      await autoGenerateAndUpload({ privacy: 'public', ayahCount });
+      console.log('تم الرفع بنجاح Public');
+    } catch (err) {
+      console.error('فشل الرفع:', err);
+      process.exit(1); // باش GitHub يبين Failed ماشي Success
+    }
+  })();
+}
