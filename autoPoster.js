@@ -296,20 +296,6 @@ module.exports = {
   scheduleCrons: Object.keys(SCHEDULE_CRONS)
 };
 // هذا هو اللي غادي يخلي GitHub Actions يخدم
-const SCHEDULE_CRONS = {
-  '0 5 * * *': '08:00',   // 08:00 Asia/Riyadh
-  '0 12 * * *': '15:00',  // 15:00 Asia/Riyadh  
-  '0 15 * * *': '18:00',  // 18:00 Asia/Riyadh
-  '0 21 * * *': '00:00'   // 00:00 Asia/Riyadh
-};
-
-const VIDEO_TYPES = [
-  { key: '1ayah', count: 1 },
-  { key: '2ayah', count: 2 },
-  { key: '3ayah', count: 3 },
-  { key: '7ayah', count: 7 }
-];
-
 if (require.main === module) {
   (async () => {
     try {
