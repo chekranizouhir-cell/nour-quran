@@ -23,8 +23,15 @@ jobs:
       - name: Install FFmpeg and ffprobe
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
-      - name: Install Chrome for Puppeteer
-        run: npx puppeteer browsers install chrome
+      - name: Install Chrome for Puppeteer and set BROWSER_EXECUTABLE_PATH
+        run: |
+          npx puppeteer@latest browsers install chrome
+          CHROME_PATH=$(find ~/.cache/puppeteer -type f -name chrome -print -quit)
+          if [ -z "$CHROME_PATH" ]; then
+            echo "Could not find chrome executable under ~/.cache/puppeteer" >&2
+            exit 1
+          fi
+          echo "BROWSER_EXECUTABLE_PATH=$CHROME_PATH" >> $GITHUB_ENV
 
       - name: Run Auto Poster
         env:
@@ -32,6 +39,5 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           GOOGLE_REDIRECT_URI: ${{ secrets.GOOGLE_REDIRECT_URI }}
-          BROWSER_EXECUTABLE_PATH: /home/runner/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome
           FFPROBE_PATH: /usr/bin/ffprobe
         run: node autoPoster.js
