@@ -19,11 +19,12 @@ const SCHEDULE_CRONS = {
   '0 15 * * *': '18:00',
   '0 21 * * *': '00:00'
 };
+// Use a single 'count' property (was mixed with ayahCount previously)
 const VIDEO_TYPES = [
-  { key: 'very-short', label: 'قصير جداً', ayahCount: 1 },
-  { key: 'short', label: 'قصير', ayahCount: 2 },
-  { key: 'medium', label: 'متوسط', ayahCount: 3 },
-  { key: 'long', label: 'طويل', ayahCount: 7 }
+  { key: 'very-short', label: 'قصير جداً', count: 1 },
+  { key: 'short', label: 'قصير', count: 2 },
+  { key: 'medium', label: 'متوسط', count: 3 },
+  { key: 'long', label: 'طويل', count: 7 }
 ];
 
 function wait(milliseconds) {
@@ -210,7 +211,8 @@ function getDailyVideoType(scheduleCron, date = new Date()) {
     const rightHash = createHash('sha256').update(`${localDate}:${right.key}`).digest('hex');
     return leftHash.localeCompare(rightHash);
   });
-  return { ...shuffledTypes[slotIndex], time, date: localDate };
+  const chosen = shuffledTypes[slotIndex];
+  return { ...chosen, time, date: localDate, count: chosen.count || chosen.ayahCount };
 }
 
 async function autoGenerateAndUpload({ privacy = 'private', ayahCount = 1 } = {}) {
