@@ -5,6 +5,8 @@ const { randomUUID } = require('crypto');
 const puppeteer = require('puppeteer');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 
+const FONT_FILE = process.env.FONT_FILE || path.join(__dirname, 'fonts', 'AmiriQuran.ttf');
+
 function probeMedia(filePath) {
   const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
   let output;
@@ -113,6 +115,12 @@ async function generateVideo({
     translationTextLength > 1200 ? 15 : translationTextLength > 700 ? 18 : translationTextLength > 300 ? 22 : 28;
   const ayahLabel = String(ayahNumber).includes('-') ? 'الآيات' : 'الآية';
 
+  const resolvedFontFile = process.env.FONT_FILE || FONT_FILE;
+  const normalizedFontPath = resolvedFontFile.replace(/\\/g, '/');
+  const fontCss = fs.existsSync(resolvedFontFile)
+    ? `@font-face { font-family: 'AmiriQuran'; src: url('file://${normalizedFontPath}') format('truetype'); }`
+    : '';
+
   let browser;
   let ffmpegStarted = false;
   try {
@@ -124,14 +132,46 @@ async function generateVideo({
     browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();
     await page.setViewport({ width: 1080, height: 1920 });
+    const videoCss = `
+        ${fontCss}
+        html, body {
+          margin: 0;
+          width: 1080px;
+          height: 1920px;
+          background: radial-gradient(#0a3d2e, #000);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          color: #f7f7f7;
+          font-family: 'AmiriQuran', 'Noto Naskh Arabic', 'Segoe UI', serif;
+          direction: rtl;
+          text-align: center;
+        }
+        body {
+          padding: 90px 60px 60px;
+          box-sizing: border-box;
+        }
+        h1 {
+          font-size: ${ayahFontSize}px;
+          line-height: 1.7;
+          text-shadow: 0 2px 20px rgba(0, 0, 0, 0.8);
+          margin: 0;
+          font-family: 'AmiriQuran', 'Noto Naskh Arabic', serif;
+        }
+        p {
+          margin: 0;
+        }
+      `;
     await page.setContent(`
-      <html dir="rtl"><body style="margin:0;width:1080px;height:1920px;background:radial-gradient(#0a3d2e,#000);display:flex;flex-direction:column;align-items:center;justify-content:center;color:white;font-family:Amiri,Arial;text-align:center;padding:70px;box-sizing:border-box;">
+      <html dir="rtl"><body>
         <p style="font-size:30px;color:#a7f3d0;margin-bottom:20px;">${escapeHtml(surahName)} - ${ayahLabel} ${escapeHtml(ayahNumber)}</p>
         <h1 style="font-size:${ayahFontSize}px;line-height:1.7;text-shadow:0 2px 20px rgba(0,0,0,0.8)">${escapeHtml(ayahText)}</h1>
         ${translationText ? `<p dir="ltr" style="font-size:${translationFontSize}px;line-height:1.5;white-space:pre-line;opacity:0.9;margin-top:35px;">${escapeHtml(translationText)}</p>` : ''}
         <p style="margin-top:80px;font-size:25px;opacity:0.7;">نور القرآن - nourquran.com</p>
       </body></html>
     `);
+    await page.addStyleTag({ content: videoCss });
     await page.screenshot({ path: imagePath });
     await browser.close();
     browser = null;
@@ -167,4 +207,4 @@ async function generateVideo({
   }
 }
 
-module.exports = { generateVideo, getAudioDuration, validateVideo };
+module.exports = { generateVideo, getAudioDuration, validateVideo, FONT_FILE };

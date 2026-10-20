@@ -9,7 +9,10 @@ const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 const { getYoutubeStatus, isYoutubeConfigured } = require('./youtubeService');
 
 const QURAN_API = 'https://api.alquran.cloud/v1/ayah';
-const EVERYAYAH_AUDIO_URL = 'https://everyayah.com/data/Alafasy_128kbps';
+const EVERYAYAH_AUDIO_URLS = [
+  'https://everyayah.com/data/Husary_128kbps',
+  'https://everyayah.com/data/Abu_Bakr_Ash-Shaatree_128kbps'
+];
 const MAX_FETCH_ATTEMPTS = 2;
 const OUTPUT_DIR = path.join(__dirname, 'output');
 const SCHEDULE_TIME_ZONE = 'Asia/Riyadh';
@@ -121,6 +124,38 @@ async function getRandomAyahs(count) {
   throw new Error(`Could not find a Quran surah containing ${count} consecutive ayahs.`);
 }
 
+async function getRandomAyahsForDuration(targetSeconds = 180) {
+  if (!Number.isFinite(targetSeconds) || targetSeconds <= 0) {
+    throw new Error(`Unsupported duration in seconds: ${targetSeconds}`);
+  }
+
+  const estimatedSecondsPerAyah = 12;
+  const count = Math.max(1, Math.ceil(targetSeconds / estimatedSecondsPerAyah));
+  const surahNumber = Math.floor(Math.random() * 114) + 1;
+
+  const [arabicResponse, englishResponse] = await Promise.all([
+    fetchQuranUrl(`${QURAN_API.replace('/ayah', '/surah')}/${surahNumber}/quran-uthmani`),
+    fetchQuranUrl(`${QURAN_API.replace('/ayah', '/surah')}/${surahNumber}/en.sahih`)
+  ]);
+
+  if (!Array.isArray(arabicResponse.ayahs) || !Array.isArray(englishResponse.ayahs) ||
+      englishResponse.ayahs.length !== arabicResponse.ayahs.length) {
+    throw new Error(`Quran API returned invalid surah data for surah ${surahNumber}`);
+  }
+
+  const available = Math.min(count, arabicResponse.ayahs.length);
+  const lastStart = arabicResponse.ayahs.length - available;
+  const start = lastStart > 0 ? Math.floor(Math.random() * (lastStart + 1)) : 0;
+
+  return arabicResponse.ayahs.slice(start, start + available).map((ayah, index) => ({
+    number: ayah.number,
+    numberInSurah: ayah.numberInSurah,
+    surah: arabicResponse,
+    arabicText: ayah.text.replace(/[\u200B-\u200D\uFEFF]/g, '').trim(),
+    englishText: englishResponse.ayahs[start + index].text.trim()
+  }));
+}
+
 function isMissingFfprobe(error) {
   if (!error) return false;
   if (error.message && error.message.includes('ffprobe was not found')) return true;
@@ -144,39 +179,51 @@ async function downloadAudio(ayah) {
     }
   }
 
-  const url = `${EVERYAYAH_AUDIO_URL}/${surahNumber}${ayahNumber}.mp3`;
-  for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt += 1) {
-    const temporaryPath = `${audioPath}.${process.pid}.${Date.now()}.part`;
-    try {
-      const response = await axios.get(url, {
-        responseType: 'stream',
-        timeout: 30000,
-        validateStatus: status => status >= 200 && status < 300
-      });
-      await pipeline(response.data, fs.createWriteStream(temporaryPath));
-      getAudioDuration(temporaryPath);
-      await fs.promises.rename(temporaryPath, audioPath);
-      return audioPath;
-    } catch (cause) {
-      await fs.promises.rm(temporaryPath, { force: true });
-      if (isMissingFfprobe(cause)) throw cause;
-      if (fs.existsSync(audioPath)) {
-        try {
-          getAudioDuration(audioPath);
-          return audioPath;
-        } catch (existingAudioError) {
-          if (isMissingFfprobe(existingAudioError)) throw existingAudioError;
-          await fs.promises.rm(audioPath, { force: true });
+  const candidates = EVERYAYAH_AUDIO_URLS.map(baseUrl => `${baseUrl}/${surahNumber}${ayahNumber}.mp3`);
+
+  for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
+    const url = candidates[candidateIndex];
+
+    for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt += 1) {
+      const temporaryPath = `${audioPath}.${process.pid}.${Date.now()}.${candidateIndex}.${attempt}.part`;
+
+      try {
+        const response = await axios.get(url, {
+          responseType: 'stream',
+          timeout: 30000,
+          validateStatus: status => status >= 200 && status < 300
+        });
+
+        await pipeline(response.data, fs.createWriteStream(temporaryPath));
+        getAudioDuration(temporaryPath);
+        await fs.promises.rename(temporaryPath, audioPath);
+        return audioPath;
+      } catch (cause) {
+        await fs.promises.rm(temporaryPath, { force: true });
+
+        if (isMissingFfprobe(cause)) throw cause;
+
+        if (fs.existsSync(audioPath)) {
+          try {
+            getAudioDuration(audioPath);
+            return audioPath;
+          } catch (existingAudioError) {
+            if (isMissingFfprobe(existingAudioError)) throw existingAudioError;
+            await fs.promises.rm(audioPath, { force: true });
+          }
         }
+
+        if (attempt === MAX_FETCH_ATTEMPTS) {
+          console.warn(`Source failed for ${url}, trying the next reciter...`);
+          break;
+        }
+
+        await wait(500 * attempt);
       }
-      if (attempt === MAX_FETCH_ATTEMPTS) {
-        throw new Error(`Could not download a valid Alafasy recitation from ${url}`, { cause });
-      }
-      await wait(500 * attempt);
     }
   }
 
-  throw new Error(`Could not download a valid Alafasy recitation for ${url}`);
+  throw new Error(`Could not download a valid Quran recitation from any source for ${surahNumber}${ayahNumber}`);
 }
 
 function getRiyadhDateAndTime(date) {
@@ -215,15 +262,21 @@ function getDailyVideoType(scheduleCron, date = new Date()) {
   return { ...chosen, time, date: localDate, count: chosen.count || chosen.ayahCount };
 }
 
-async function autoGenerateAndUpload({ privacy = 'private', ayahCount = 1 } = {}) {
-  const ayahs = await getRandomAyahs(ayahCount);
+async function autoGenerateAndUpload({
+  privacy = 'private',
+  ayahCount = 1,
+  targetDurationSeconds = 180
+} = {}) {
+  const ayahs = targetDurationSeconds
+    ? await getRandomAyahsForDuration(targetDurationSeconds)
+    : await getRandomAyahs(ayahCount);
   const firstAyah = ayahs[0];
   const lastAyah = ayahs[ayahs.length - 1];
   console.log(
     'كيولد:',
     firstAyah.surah.englishName,
     `${firstAyah.numberInSurah}-${lastAyah.numberInSurah}`,
-    `(${ayahCount} آيات)`
+    `(${ayahs.length} آيات)`
   );
 
   const audioPaths = await Promise.all(ayahs.map(downloadAudio));
@@ -260,21 +313,21 @@ async function autoGenerateAndUpload({ privacy = 'private', ayahCount = 1 } = {}
     });
 
     const fullTitle =
-      `${ayahText} - ${firstAyah.surah.name} الآيات ${firstAyah.numberInSurah}-${lastAyah.numberInSurah} | تلاوة العفاسي`;
+      `${ayahText} - ${firstAyah.surah.name} الآيات ${firstAyah.numberInSurah}-${lastAyah.numberInSurah} | تلاوة قرآنية`;
     const title = Array.from(fullTitle).slice(0, 100).join('');
     const description = [
       ayahText,
       translationText,
       `تلاوة من سورة ${firstAyah.surah.name}، الآيات ${firstAyah.numberInSurah}-${lastAyah.numberInSurah}.`,
       'استمع إلى القرآن الكريم وتدبر معانيه.',
-      '#القرآن_الكريم #تلاوة #العفاسي #Quran'
+      '#القرآن_الكريم #تلاوة #Quran #Husary'
     ].join('\n\n');
 
     return await getYoutubeStatus({
       filePath,
       title,
       description,
-      tags: ['القرآن الكريم', 'تلاوة العفاسي', 'Quran', 'Alafasy'],
+      tags: ['القرآن الكريم', 'تلاوة قرآنية', 'Quran', 'Husary'],
       privacy
     });
   } finally {
@@ -293,6 +346,7 @@ module.exports = {
   downloadAudio,
   getAyah,
   getRandomAyahs,
+  getRandomAyahsForDuration,
   getDailyVideoType,
   isYoutubeConfigured,
   scheduleCrons: Object.keys(SCHEDULE_CRONS)
@@ -317,7 +371,11 @@ if (require.main === module) {
 
       const ayahCount = videoType.count || VIDEO_TYPES.find(t => t.key === videoType.key)?.count || 1;
       
-      await autoGenerateAndUpload({ privacy: 'public', ayahCount });
+          await autoGenerateAndUpload({
+            privacy: 'public',
+            ayahCount,
+            targetDurationSeconds: 180
+          });
       console.log('تم الرفع بنجاح Public');
     } catch (err) {
       console.error('فشل الرفع:', err);

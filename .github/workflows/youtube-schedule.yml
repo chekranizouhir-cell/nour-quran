@@ -20,6 +20,9 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Prepare Quranic font
+        run: npm run prepare:font
+
       - name: Install FFmpeg and ffprobe
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
@@ -40,4 +43,5 @@ jobs:
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           GOOGLE_REDIRECT_URI: ${{ secrets.GOOGLE_REDIRECT_URI }}
           FFPROBE_PATH: /usr/bin/ffprobe
+          FONT_FILE: ${{ github.workspace }}/fonts/AmiriQuran.ttf
         run: node autoPoster.js
