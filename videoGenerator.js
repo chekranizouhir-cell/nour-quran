@@ -172,17 +172,17 @@ async function generateVideo({
           text-align: center;
         }
         body {
-          padding: 90px 60px 60px;
+          padding: 50px 50px 40px;
           box-sizing: border-box;
           overflow: hidden;
           background: #0a1910;
         }
         h1 {
           width: 100%;
-          max-height: 1200px;
+          max-height: 1550px;
           font-size: 70px;
           font-weight: 400;
-          line-height: 1.45;
+          line-height: 1.35;
           color: #FFFFFF;
           -webkit-text-stroke: 0.5px #FFFFFF;
           text-shadow: 0 3px 8px rgba(0, 0, 0, 0.9);
@@ -205,10 +205,10 @@ async function generateVideo({
       const slideAyahNumber = Number.isInteger(firstAyahNumber) ? firstAyahNumber + index : ayahNumber;
       await page.setContent(`
         <html dir="rtl"><body>
-          <p style="font-size:30px;color:#a7f3d0;margin-bottom:20px;">${escapeHtml(surahName)} - الآية ${escapeHtml(slideAyahNumber)}</p>
+          <p style="font-size:26px;color:#a7f3d0;margin-bottom:15px;">${escapeHtml(surahName)} - الآية ${escapeHtml(slideAyahNumber)}</p>
           <h1 id="ayah-text">${escapeHtml(slide.ayahText)}</h1>
-          ${slide.translationText ? `<p dir="ltr" style="font-size:${translationFontSize}px;line-height:1.5;white-space:pre-line;opacity:0.9;margin-top:35px;">${escapeHtml(slide.translationText)}</p>` : ''}
-          <p style="margin-top:80px;font-size:25px;opacity:0.7;">نور القرآن - nourquran.com</p>
+          ${slide.translationText ? `<p dir="ltr" style="font-size:${translationFontSize}px;line-height:1.5;white-space:pre-line;opacity:0.9;margin-top:20px;">${escapeHtml(slide.translationText)}</p>` : ''}
+          <p style="margin-top:30px;font-size:22px;opacity:0.7;">نور القرآن - nourquran.com</p>
         </body></html>
       `);
       await page.addStyleTag({ content: videoCss });
@@ -221,10 +221,11 @@ async function generateVideo({
       await page.evaluate(() => {
         const ayah = document.getElementById('ayah-text');
         let fits = false;
-        for (let size = 70; size >= 18; size -= 2) {
+        for (let size = 70; size >= 12; size -= 1) {
           ayah.style.fontSize = `${size}px`;
+          const bounds = ayah.getBoundingClientRect();
           if (ayah.scrollHeight <= ayah.clientHeight &&
-              document.body.scrollHeight <= document.body.clientHeight) {
+              bounds.top >= 0 && bounds.bottom <= window.innerHeight) {
             fits = true;
             break;
           }
