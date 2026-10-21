@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { randomUUID } = require('crypto');
+const { pathToFileURL } = require('url');
 const puppeteer = require('puppeteer');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 
@@ -105,21 +106,35 @@ async function generateVideo({
   const outputDir = path.join(__dirname, 'output');
   fs.mkdirSync(outputDir, { recursive: true });
 
-  const imagePath = path.join(outputDir, `temp_${randomUUID()}.png`);
+  const imagePaths = [];
   const videoPath = path.resolve(outputPath || path.join(outputDir, `quran_${Date.now()}.mp4`));
   fs.mkdirSync(path.dirname(videoPath), { recursive: true });
-  const ayahTextLength = Array.from(ayahText).length;
-  const translationTextLength = Array.from(translationText || '').length;
-  const ayahFontSize = ayahTextLength > 700 ? 30 : ayahTextLength > 400 ? 38 : ayahTextLength > 220 ? 48 : 65;
-  const translationFontSize =
-    translationTextLength > 1200 ? 15 : translationTextLength > 700 ? 18 : translationTextLength > 300 ? 22 : 28;
   const ayahLabel = String(ayahNumber).includes('-') ? 'الآيات' : 'الآية';
+  const ayahs = String(ayahText).split(/\s+۞\s+/u);
+  const normalizedTranslationText = String(translationText || '');
+  const translations = normalizedTranslationText ? normalizedTranslationText.split(/\n\s*\n/) : [];
+  const hasPerAyahTranslations = translations.length === ayahs.length;
+  const slides = [];
+  for (let index = 0; index < ayahs.length; index += 3) {
+    slides.push({
+      ayahText: ayahs.slice(index, index + 3).join(' ۞ '),
+      translationText: hasPerAyahTranslations
+        ? translations.slice(index, index + 3).join('\n\n')
+        : index === 0 ? normalizedTranslationText : '',
+      ayahCount: Math.min(3, ayahs.length - index)
+    });
+  }
 
   const resolvedFontFile = process.env.FONT_FILE || FONT_FILE;
-  const normalizedFontPath = resolvedFontFile.replace(/\\/g, '/');
-  const fontCss = fs.existsSync(resolvedFontFile)
-    ? `@font-face { font-family: 'AmiriQuran'; src: url('file://${normalizedFontPath}') format('truetype'); }`
-    : '';
+  if (!fs.existsSync(resolvedFontFile)) {
+    throw new Error(`Amiri font file was not found: ${resolvedFontFile}. Run npm run prepare:font first.`);
+  }
+  const fontUrl = pathToFileURL(resolvedFontFile).href;
+  const fontCss = `@font-face {
+    font-family: 'AmiriQuran';
+    src: url('${fontUrl}') format('truetype');
+    font-weight: 400;
+  }`;
 
   let browser;
   let ffmpegStarted = false;
@@ -153,9 +168,12 @@ async function generateVideo({
           box-sizing: border-box;
         }
         h1 {
-          font-size: ${ayahFontSize}px;
-          line-height: 1.7;
-          text-shadow: 0 2px 20px rgba(0, 0, 0, 0.8);
+          width: 100%;
+          font-size: 42px;
+          font-weight: 700;
+          line-height: 60px;
+          color: #FFFFFF;
+          text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
           margin: 0;
           font-family: 'AmiriQuran', 'Noto Naskh Arabic', serif;
         }
@@ -163,33 +181,49 @@ async function generateVideo({
           margin: 0;
         }
       `;
-    await page.setContent(`
-      <html dir="rtl"><body>
-        <p style="font-size:30px;color:#a7f3d0;margin-bottom:20px;">${escapeHtml(surahName)} - ${ayahLabel} ${escapeHtml(ayahNumber)}</p>
-        <h1 style="font-size:${ayahFontSize}px;line-height:1.7;text-shadow:0 2px 20px rgba(0,0,0,0.8)">${escapeHtml(ayahText)}</h1>
-        ${translationText ? `<p dir="ltr" style="font-size:${translationFontSize}px;line-height:1.5;white-space:pre-line;opacity:0.9;margin-top:35px;">${escapeHtml(translationText)}</p>` : ''}
-        <p style="margin-top:80px;font-size:25px;opacity:0.7;">نور القرآن - nourquran.com</p>
-      </body></html>
-    `);
-    await page.addStyleTag({ content: videoCss });
-    await page.screenshot({ path: imagePath });
+    for (const slide of slides) {
+      const translationFontSize =
+        slide.translationText.length > 1200 ? 15
+          : slide.translationText.length > 700 ? 18
+            : slide.translationText.length > 300 ? 22 : 28;
+      const imagePath = path.join(outputDir, `temp_${randomUUID()}.png`);
+      imagePaths.push(imagePath);
+      await page.setContent(`
+        <html dir="rtl"><body>
+          <p style="font-size:30px;color:#a7f3d0;margin-bottom:20px;">${escapeHtml(surahName)} - ${ayahLabel} ${escapeHtml(ayahNumber)}</p>
+          <h1>${escapeHtml(slide.ayahText)}</h1>
+          ${slide.translationText ? `<p dir="ltr" style="font-size:${translationFontSize}px;line-height:1.5;white-space:pre-line;opacity:0.9;margin-top:35px;">${escapeHtml(slide.translationText)}</p>` : ''}
+          <p style="margin-top:80px;font-size:25px;opacity:0.7;">نور القرآن - nourquran.com</p>
+        </body></html>
+      `);
+      await page.addStyleTag({ content: videoCss });
+      await page.evaluate(() => document.fonts.ready);
+      await page.screenshot({ path: imagePath });
+    }
     await browser.close();
     browser = null;
 
     console.log(`2. كنركب الفيديو مع الصوت (${duration.toFixed(2)} ثانية) بكوديك yuv420p...`);
     ffmpegStarted = true;
+    const totalAyahs = slides.reduce((total, slide) => total + slide.ayahCount, 0);
+    const videoInputs = slides.flatMap((slide, index) => [
+      '-loop', '1',
+      '-t', String(duration * slide.ayahCount / totalAyahs),
+      '-i', imagePaths[index]
+    ]);
+    const videoLabels = slides.map((_, index) => `[${index}:v]`).join('');
     execFileSync(ffmpegInstaller.path, [
       '-y',
-      '-loop', '1', '-i', imagePath,
+      ...videoInputs,
       '-i', audioPath,
-      '-map', '0:v:0', '-map', '1:a:0',
+      '-filter_complex', `${videoLabels}concat=n=${slides.length}:v=1:a=0,scale=1080:1920[v]`,
+      '-map', '[v]', '-map', `${slides.length}:a:0`,
       '-c:v', 'libx264',
       '-c:a', 'aac',
       '-b:a', '192k',
       '-t', String(duration),
       '-r', '30',
       '-pix_fmt', 'yuv420p',
-      '-vf', 'scale=1080:1920',
       '-movflags', '+faststart',
       '-shortest',
       videoPath
@@ -203,7 +237,9 @@ async function generateVideo({
     throw error;
   } finally {
     if (browser) await browser.close();
-    if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
+    for (const imagePath of imagePaths) {
+      if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
+    }
   }
 }
 
