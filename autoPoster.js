@@ -156,6 +156,45 @@ async function getRandomAyahsForDuration(targetSeconds = 180) {
   }));
 }
 
+async function getRandomAyahsSmart() {
+  const minimumSeconds = 120;
+  const maximumSeconds = 300;
+  const estimatedSecondsPerAyah = 12;
+  const minimumAyahs = Math.ceil(minimumSeconds / estimatedSecondsPerAyah);
+  const maximumAyahs = Math.floor(maximumSeconds / estimatedSecondsPerAyah);
+
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const count = Math.floor(Math.random() * (maximumAyahs - minimumAyahs + 1)) + minimumAyahs;
+    const surahNumber = Math.floor(Math.random() * 114) + 1;
+    const [arabic, english] = await Promise.all([
+      fetchQuranUrl(`${QURAN_API.replace('/ayah', '/surah')}/${surahNumber}/quran-uthmani`),
+      fetchQuranUrl(`${QURAN_API.replace('/ayah', '/surah')}/${surahNumber}/en.sahih`)
+    ]);
+
+    if (!Array.isArray(arabic.ayahs) || !Array.isArray(english.ayahs) ||
+        english.ayahs.length !== arabic.ayahs.length) {
+      throw new Error(`Quran API returned invalid surah data for surah ${surahNumber}`);
+    }
+    if (arabic.ayahs.length < count) continue;
+
+    const lastStart = arabic.ayahs.length - count;
+    const start = Math.floor(Math.random() * (lastStart + 1));
+    console.log(
+      `اختيار ذكي: ${count} آيات من ${arabic.name} - متوقع حوالي ` +
+      `${(count * estimatedSecondsPerAyah / 60).toFixed(1)} دقيقة`
+    );
+    return arabic.ayahs.slice(start, start + count).map((ayah, index) => ({
+      number: ayah.number,
+      numberInSurah: ayah.numberInSurah,
+      surah: arabic,
+      arabicText: ayah.text.replace(/[\u200B-\u200D\uFEFF]/g, '').trim(),
+      englishText: english.ayahs[start + index].text.trim()
+    }));
+  }
+
+  throw new Error('Could not find a Quran passage estimated to last between 2 and 5 minutes.');
+}
+
 function isMissingFfprobe(error) {
   if (!error) return false;
   if (error.message && error.message.includes('ffprobe was not found')) return true;
@@ -264,12 +303,14 @@ function getDailyVideoType(scheduleCron, date = new Date()) {
 
 async function autoGenerateAndUpload({
   privacy = 'private',
-  ayahCount = 1,
-  targetDurationSeconds = 180
+  ayahCount,
+  targetDurationSeconds
 } = {}) {
-  const ayahs = targetDurationSeconds
+  const ayahs = targetDurationSeconds !== undefined
     ? await getRandomAyahsForDuration(targetDurationSeconds)
-    : await getRandomAyahs(ayahCount);
+    : ayahCount !== undefined
+      ? await getRandomAyahs(ayahCount)
+      : await getRandomAyahsSmart();
   const firstAyah = ayahs[0];
   const lastAyah = ayahs[ayahs.length - 1];
   console.log(
@@ -347,6 +388,7 @@ module.exports = {
   getAyah,
   getRandomAyahs,
   getRandomAyahsForDuration,
+  getRandomAyahsSmart,
   getDailyVideoType,
   isYoutubeConfigured,
   scheduleCrons: Object.keys(SCHEDULE_CRONS)
@@ -355,31 +397,14 @@ module.exports = {
 if (require.main === module) {
   (async () => {
     try {
-      // كيحدد شحال من آية على حسب الوقت ديال السعودية
-      const now = new Date();
-      // تقدر تاخد الوقت من GitHub cron ولا من الوقت الحالي
-      let cronKey = Object.keys(SCHEDULE_CRONS)[0];
-      const riyadhHour = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Riyadh', hour: '2-digit', hourCycle: 'h23' }).format(now);
-      
-      if (riyadhHour === '08') cronKey = '0 5 * * *';
-      else if (riyadhHour === '15') cronKey = '0 12 * * *';
-      else if (riyadhHour === '18') cronKey = '0 15 * * *';
-      else cronKey = '0 21 * * *';
-
-      const videoType = getDailyVideoType(cronKey, now);
-      console.log(`الوقت: ${videoType.time} - النوع: ${videoType.key} - ${videoType.count || ''} آيات`);
-
-      const ayahCount = videoType.count || VIDEO_TYPES.find(t => t.key === videoType.key)?.count || 1;
-      
-          await autoGenerateAndUpload({
-            privacy: 'public',
-            ayahCount,
-            targetDurationSeconds: 180
-          });
-      console.log('تم الرفع بنجاح Public');
+      const result = await autoGenerateAndUpload({ privacy: 'public' });
+      if (!result || result.status !== 'uploaded') {
+        throw new Error('YouTube upload did not complete successfully.');
+      }
+      console.log('تم الرفع بنجاح Public - المدة المتوقعة بين دقيقتين و5 دقايق');
     } catch (err) {
       console.error('فشل الرفع:', err);
-      process.exit(1); // باش GitHub يبين Failed ماشي Success
+      process.exitCode = 1;
     }
   })();
 }

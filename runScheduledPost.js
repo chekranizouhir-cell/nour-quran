@@ -10,11 +10,10 @@ async function runScheduledPost() {
   }
 
   console.log(
-    `نشر ${videoType.label}: ${videoType.ayahCount} آيات، موعد ${videoType.time} بتوقيت Asia/Riyadh.`
+    `نشر فيديو بمدة متوقعة بين دقيقتين و5 دقايق، موعد ${videoType.time} بتوقيت Asia/Riyadh.`
   );
   const result = await autoGenerateAndUpload({
-    privacy: 'public',
-    ayahCount: videoType.ayahCount
+    privacy: 'public'
   });
   if (!result || result.status !== 'uploaded') {
     throw new Error('Scheduled YouTube upload did not complete successfully.');
