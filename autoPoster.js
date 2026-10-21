@@ -350,7 +350,12 @@ async function autoGenerateAndUpload({
         ? firstAyah.numberInSurah
         : `${firstAyah.numberInSurah}-${lastAyah.numberInSurah}`,
       translationText,
-      audioPath
+      audioPath,
+      ayahSlides: ayahs.map((ayah, index) => ({
+        text: ayah.arabicText,
+        translationText: ayah.englishText,
+        audioDuration: getAudioDuration(audioPaths[index])
+      }))
     });
 
     const fullTitle =

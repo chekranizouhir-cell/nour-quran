@@ -7,6 +7,32 @@ const puppeteer = require('puppeteer');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 
 const FONT_FILE = process.env.FONT_FILE || path.join(__dirname, 'fonts', 'AmiriQuran.ttf');
+const BACKGROUND_DIR = path.join(__dirname, 'assets', 'backgrounds');
+
+const BACKGROUND_STYLES = {
+  jannah: { file: 'jannah.jpg', gradient: 'linear-gradient(145deg, #064e3b, #166534 55%, #052e16)' },
+  jahannam: { file: 'jahannam.jpg', gradient: 'linear-gradient(145deg, #450a0a, #7f1d1d 55%, #1c0a0a)' },
+  sky: { file: 'sky.jpg', gradient: 'linear-gradient(145deg, #0c1445, #1e3a8a 55%, #080d24)' },
+  sea: { file: 'sea.jpg', gradient: 'linear-gradient(145deg, #082f49, #0369a1 55%, #082f49)' },
+  mountains: { file: 'mountains.jpg', gradient: 'linear-gradient(145deg, #292524, #57534e 55%, #1c1917)' },
+  default: { file: 'default.jpg', gradient: 'linear-gradient(145deg, #0a3d2e, #000)' }
+};
+
+function classifyAyah(arabicText) {
+  const normalizedText = String(arabicText).replace(/[\u064B-\u065F\u0670\u06D6-\u06ED]/g, '');
+  if (/(جنة|جنات|نعيم|أنهار|فردوس|عدن)/u.test(normalizedText)) return 'jannah';
+  if (/(نار|جهنم|جحيم|سعير|عذاب|سقر|حريق)/u.test(normalizedText)) return 'jahannam';
+  if (/(سماء|سماوات|نجم|نجوم|قمر|شمس|كوكب|ليل|نهار)/u.test(normalizedText)) return 'sky';
+  if (/(بحر|بحار|موج|سفينة|فلك|ماء)/u.test(normalizedText)) return 'sea';
+  if (/(جبل|جبال|أرض|صخر|تراب|راسية)/u.test(normalizedText)) return 'mountains';
+  return 'default';
+}
+
+function getBackgroundPath(category) {
+  const background = BACKGROUND_STYLES[category] || BACKGROUND_STYLES.default;
+  const filePath = path.join(BACKGROUND_DIR, background.file);
+  return fs.existsSync(filePath) ? filePath : null;
+}
 
 function probeMedia(filePath) {
   const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
@@ -93,7 +119,8 @@ async function generateVideo({
   ayahNumber,
   audioPath,
   outputPath,
-  translationText
+  translationText,
+  ayahSlides
 }) {
   if (!ayahText || !surahName || ayahNumber === undefined || ayahNumber === null) {
     throw new Error('Ayah text, surah name, and ayah number are required.');
@@ -109,21 +136,30 @@ async function generateVideo({
   const imagePaths = [];
   const videoPath = path.resolve(outputPath || path.join(outputDir, `quran_${Date.now()}.mp4`));
   fs.mkdirSync(path.dirname(videoPath), { recursive: true });
-  const ayahLabel = String(ayahNumber).includes('-') ? 'الآيات' : 'الآية';
-  const ayahs = String(ayahText).split(/\s+۞\s+/u);
+  const firstAyahNumber = Number.parseInt(String(ayahNumber).split('-')[0], 10);
   const normalizedTranslationText = String(translationText || '');
-  const translations = normalizedTranslationText ? normalizedTranslationText.split(/\n\s*\n/) : [];
-  const hasPerAyahTranslations = translations.length === ayahs.length;
-  const slides = [];
-  for (let index = 0; index < ayahs.length; index += 3) {
-    slides.push({
-      ayahText: ayahs.slice(index, index + 3).join(' ۞ '),
-      translationText: hasPerAyahTranslations
-        ? translations.slice(index, index + 3).join('\n\n')
-        : index === 0 ? normalizedTranslationText : '',
-      ayahCount: Math.min(3, ayahs.length - index)
-    });
+  let slides;
+  if (ayahSlides !== undefined) {
+    if (!Array.isArray(ayahSlides) || ayahSlides.length === 0 ||
+        ayahSlides.some(slide => !slide || typeof slide.text !== 'string' || !slide.text.trim() ||
+          !Number.isFinite(slide.audioDuration) || slide.audioDuration <= 0)) {
+      throw new Error('Ayah slides must contain text and a positive audio duration for every ayah.');
+    }
+    slides = ayahSlides.map(slide => ({
+      ayahText: slide.text,
+      translationText: String(slide.translationText || ''),
+      audioDuration: slide.audioDuration
+    }));
+  } else {
+    const ayahs = String(ayahText).split(/\s+۞\s+/u);
+    const translations = normalizedTranslationText ? normalizedTranslationText.split(/\n\s*\n/) : [];
+    const hasPerAyahTranslations = translations.length === ayahs.length;
+    slides = ayahs.map((text, index) => ({
+      ayahText: text,
+      translationText: hasPerAyahTranslations ? translations[index] : index === 0 ? normalizedTranslationText : ''
+    }));
   }
+  const totalAyahAudioDuration = slides.reduce((total, slide) => total + (slide.audioDuration || 1), 0);
 
   const resolvedFontFile = process.env.FONT_FILE || FONT_FILE;
   if (!fs.existsSync(resolvedFontFile)) {
@@ -153,7 +189,6 @@ async function generateVideo({
           margin: 0;
           width: 1080px;
           height: 1920px;
-          background: radial-gradient(#0a3d2e, #000);
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -166,38 +201,62 @@ async function generateVideo({
         body {
           padding: 90px 60px 60px;
           box-sizing: border-box;
+          overflow: hidden;
         }
         h1 {
           width: 100%;
-          font-size: 42px;
-          font-weight: 700;
-          line-height: 60px;
+          max-height: 1200px;
+          font-size: 70px;
+          font-weight: 400;
+          line-height: 1.45;
           color: #FFFFFF;
-          text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+          -webkit-text-stroke: 0.5px #FFFFFF;
+          text-shadow: 0 3px 8px rgba(0, 0, 0, 0.9);
           margin: 0;
           font-family: 'AmiriQuran', 'Noto Naskh Arabic', serif;
+          direction: rtl;
+          text-align: center;
         }
         p {
           margin: 0;
         }
       `;
-    for (const slide of slides) {
+    for (const [index, slide] of slides.entries()) {
       const translationFontSize =
         slide.translationText.length > 1200 ? 15
           : slide.translationText.length > 700 ? 18
             : slide.translationText.length > 300 ? 22 : 28;
       const imagePath = path.join(outputDir, `temp_${randomUUID()}.png`);
       imagePaths.push(imagePath);
+      const slideAyahNumber = Number.isInteger(firstAyahNumber) ? firstAyahNumber + index : ayahNumber;
+      const category = classifyAyah(slide.ayahText);
+      const backgroundImage = getBackgroundPath(category);
+      const background = backgroundImage
+        ? `linear-gradient(rgba(0, 0, 0, 0.68), rgba(0, 0, 0, 0.68)), url('${pathToFileURL(backgroundImage).href}') center / cover no-repeat`
+        : `linear-gradient(rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.35)), ${BACKGROUND_STYLES[category].gradient}`;
       await page.setContent(`
-        <html dir="rtl"><body>
-          <p style="font-size:30px;color:#a7f3d0;margin-bottom:20px;">${escapeHtml(surahName)} - ${ayahLabel} ${escapeHtml(ayahNumber)}</p>
-          <h1>${escapeHtml(slide.ayahText)}</h1>
+        <html dir="rtl"><body style="background: ${background};">
+          <p style="font-size:30px;color:#a7f3d0;margin-bottom:20px;">${escapeHtml(surahName)} - الآية ${escapeHtml(slideAyahNumber)}</p>
+          <h1 id="ayah-text">${escapeHtml(slide.ayahText)}</h1>
           ${slide.translationText ? `<p dir="ltr" style="font-size:${translationFontSize}px;line-height:1.5;white-space:pre-line;opacity:0.9;margin-top:35px;">${escapeHtml(slide.translationText)}</p>` : ''}
           <p style="margin-top:80px;font-size:25px;opacity:0.7;">نور القرآن - nourquran.com</p>
         </body></html>
       `);
       await page.addStyleTag({ content: videoCss });
       await page.evaluate(() => document.fonts.ready);
+      await page.evaluate(() => {
+        const ayah = document.getElementById('ayah-text');
+        let fits = false;
+        for (let size = 70; size >= 18; size -= 2) {
+          ayah.style.fontSize = `${size}px`;
+          if (ayah.scrollHeight <= ayah.clientHeight &&
+              document.body.scrollHeight <= document.body.clientHeight) {
+            fits = true;
+            break;
+          }
+        }
+        if (!fits) throw new Error('Ayah text does not fit in the video frame without clipping.');
+      });
       await page.screenshot({ path: imagePath });
     }
     await browser.close();
@@ -205,10 +264,10 @@ async function generateVideo({
 
     console.log(`2. كنركب الفيديو مع الصوت (${duration.toFixed(2)} ثانية) بكوديك yuv420p...`);
     ffmpegStarted = true;
-    const totalAyahs = slides.reduce((total, slide) => total + slide.ayahCount, 0);
     const videoInputs = slides.flatMap((slide, index) => [
       '-loop', '1',
-      '-t', String(duration * slide.ayahCount / totalAyahs),
+      '-framerate', '30',
+      '-t', String(duration * (slide.audioDuration || 1) / totalAyahAudioDuration),
       '-i', imagePaths[index]
     ]);
     const videoLabels = slides.map((_, index) => `[${index}:v]`).join('');
@@ -243,4 +302,11 @@ async function generateVideo({
   }
 }
 
-module.exports = { generateVideo, getAudioDuration, validateVideo, FONT_FILE };
+module.exports = {
+  generateVideo,
+  getAudioDuration,
+  validateVideo,
+  classifyAyah,
+  getBackgroundPath,
+  FONT_FILE
+};
