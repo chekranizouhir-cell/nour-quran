@@ -1,6 +1,6 @@
 # Nour Quran
 
-A Quran ayah viewer and automation that creates vertical Quran videos with an Alafasy recitation. Manual uploads are private by default; GitHub Actions scheduled uploads are public.
+A Quran ayah viewer and automation that creates vertical Quran videos with a Husary recitation. Manual uploads are private by default; GitHub Actions scheduled uploads are public.
 
 ## Run locally
 
@@ -19,11 +19,11 @@ http://localhost:3000
 
 - The frontend loads a random ayah from the Quran API.
 - The browser's speech engine is used as a reliable fallback for reading the displayed verse aloud.
-- `POST /api/auto/high-quality` gets consecutive Arabic ayahs and English translations for an estimated three-minute recitation, tries Husary and then Abu Bakr Ash-Shaatree audio from EveryAyah, creates a 1080x1920 MP4, and uploads it as private.
-- `.github/workflows/youtube-schedule.yml` runs four daily GitHub Actions jobs at 08:00, 15:00, 18:00, and 00:00 (Asia/Riyadh). Scheduled videos select consecutive ayahs from one surah based on an estimated three-minute duration; actual duration depends on the recitation and is not guaranteed. Audio downloads try Husary and then Abu Bakr Ash-Shaatree.
+- `POST /api/auto/high-quality` gets 1-4 consecutive Arabic ayahs and English translations, uses Husary recitation from EveryAyah, creates a 1080x1920 MP4, and uploads it as private.
+- `.github/workflows/youtube-schedule.yml` runs four daily GitHub Actions jobs at 08:00, 15:00, 18:00, and 00:00 (Asia/Riyadh). Scheduled videos select 1-4 consecutive ayahs from one surah. Video duration depends on the recitation and is not guaranteed to fit a specific length or YouTube Shorts eligibility threshold.
 - To enable cloud posting, push the project (including the workflow file) to the repository's default branch, add repository Actions secrets named `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, and `GOOGLE_REFRESH_TOKEN`, then enable Actions for the repository. The scheduled workflow installs FFmpeg and Chrome and publishes videos publicly. GitHub may delay scheduled workflows, and usage limits depend on repository visibility and plan; the schedule is not guaranteed to start at the exact minute.
 - Video generation requires Chrome. Puppeteer normally downloads it during installation; if needed, run `npx puppeteer browsers install chrome`. Set `BROWSER_EXECUTABLE_PATH` to use an installed browser.
-- The Amiri Quran font is downloaded during `npm install`; run `npm run prepare:font` to prepare it again. Set `FONT_FILE` to use a different font file.
+- The Amiri Quran font is bundled at `assets/fonts/Amiri-Regular.ttf` under the SIL Open Font License. Run `npm run prepare:font` if the file is missing; set `FONT_FILE` to use a different font file. Video rendering embeds the font in the page and checks that Chromium loaded it before capturing each frame.
 - FFmpeg is bundled by `@ffmpeg-installer/ffmpeg`. `ffprobe` must also be installed and available on `PATH`; otherwise set `FFPROBE_PATH` in `.env`.
 - Generated videos are rejected before upload unless they contain H.264 video, AAC audio, `yuv420p`, and 1080x1920 frames.
 - YouTube uploads require `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REFRESH_TOKEN` in `.env`. The uploader requires a title, description, and tags and defaults to private visibility.

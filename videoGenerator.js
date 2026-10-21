@@ -2,11 +2,10 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { randomUUID } = require('crypto');
-const { pathToFileURL } = require('url');
 const puppeteer = require('puppeteer');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 
-const FONT_FILE = process.env.FONT_FILE || path.join(__dirname, 'fonts', 'AmiriQuran.ttf');
+const FONT_FILE = process.env.FONT_FILE || path.join(__dirname, 'assets', 'fonts', 'Amiri-Regular.ttf');
 
 function probeMedia(filePath) {
   const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
@@ -139,10 +138,10 @@ async function generateVideo({
   if (!fs.existsSync(resolvedFontFile)) {
     throw new Error(`Amiri font file was not found: ${resolvedFontFile}. Run npm run prepare:font first.`);
   }
-  const fontUrl = pathToFileURL(resolvedFontFile).href;
+  const fontData = fs.readFileSync(resolvedFontFile).toString('base64');
   const fontCss = `@font-face {
     font-family: 'AmiriQuran';
-    src: url('${fontUrl}') format('truetype');
+    src: url('data:font/ttf;base64,${fontData}') format('truetype');
     font-weight: 400;
   }`;
 
@@ -213,7 +212,12 @@ async function generateVideo({
         </body></html>
       `);
       await page.addStyleTag({ content: videoCss });
-      await page.evaluate(() => document.fonts.ready);
+      await page.evaluate(async () => {
+        const loadedFonts = await document.fonts.load('400 70px AmiriQuran', 'بِسْمِ اللَّهِ');
+        if (loadedFonts.length === 0) {
+          throw new Error('Amiri font failed to load; refusing to render unreadable Arabic text.');
+        }
+      });
       await page.evaluate(() => {
         const ayah = document.getElementById('ayah-text');
         let fits = false;

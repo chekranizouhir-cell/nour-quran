@@ -43,5 +43,5 @@ jobs:
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           GOOGLE_REDIRECT_URI: ${{ secrets.GOOGLE_REDIRECT_URI }}
           FFPROBE_PATH: /usr/bin/ffprobe
-          FONT_FILE: ${{ github.workspace }}/fonts/AmiriQuran.ttf
+          FONT_FILE: ${{ github.workspace }}/assets/fonts/Amiri-Regular.ttf
         run: node autoPoster.js
