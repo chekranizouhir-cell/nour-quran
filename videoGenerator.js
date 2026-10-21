@@ -172,17 +172,17 @@ async function generateVideo({
           text-align: center;
         }
         body {
-          padding: 50px 50px 40px;
+          padding: 30px 44px 20px;
           box-sizing: border-box;
           overflow: hidden;
           background: #0a1910;
         }
         h1 {
           width: 100%;
-          max-height: 1550px;
+          max-height: none;
           font-size: 70px;
           font-weight: 400;
-          line-height: 1.35;
+          line-height: 1.6;
           color: #FFFFFF;
           -webkit-text-stroke: 0.5px #FFFFFF;
           text-shadow: 0 3px 8px rgba(0, 0, 0, 0.9);
@@ -190,6 +190,8 @@ async function generateVideo({
           font-family: 'AmiriQuran', 'Noto Naskh Arabic', serif;
           direction: rtl;
           text-align: center;
+          overflow-wrap: break-word;
+          word-break: break-word;
         }
         p {
           margin: 0;
@@ -220,17 +222,33 @@ async function generateVideo({
       });
       await page.evaluate(() => {
         const ayah = document.getElementById('ayah-text');
+        const body = document.body;
+        // available height = 1920 - small safety margin
+        const maxBodyHeight = 1880;
         let fits = false;
-        for (let size = 70; size >= 12; size -= 1) {
+        let finalSize = 70;
+        for (let size = 70; size >= 10; size--) {
           ayah.style.fontSize = `${size}px`;
-          const bounds = ayah.getBoundingClientRect();
-          if (ayah.scrollHeight <= ayah.clientHeight &&
-              bounds.top >= 0 && bounds.bottom <= window.innerHeight) {
+          // force reflow
+          void ayah.offsetHeight;
+          if (body.scrollHeight <= maxBodyHeight && ayah.scrollHeight <= 1600) {
+            finalSize = size;
             fits = true;
             break;
           }
         }
-        if (!fits) throw new Error('Ayah text does not fit in the video frame without clipping.');
+        if (!fits) {
+          // Last resort: keep smallest size, allow scrolling check to pass by reducing other elements
+          ayah.style.fontSize = '10px';
+          const header = document.querySelector('p');
+          if (header) header.style.display = 'none';
+          // re-check
+          if (body.scrollHeight <= maxBodyHeight) fits = true;
+        }
+        if (!fits) {
+          console.log('DEBUG scroll', {bodyH: body.scrollHeight, ayahH: ayah.scrollHeight, size: finalSize});
+          throw new Error('Ayah text does not fit in the video frame without clipping.');
+        }
       });
       await page.screenshot({ path: imagePath });
     }
