@@ -209,7 +209,7 @@ async function generateVideo({
         <html dir="rtl"><body>
           <p style="font-size:26px;color:#a7f3d0;margin-bottom:15px;">${escapeHtml(surahName)} - الآية ${escapeHtml(slideAyahNumber)}</p>
           <h1 id="ayah-text">${escapeHtml(slide.ayahText)}</h1>
-          ${slide.translationText ? `<p dir="ltr" style="font-size:${translationFontSize}px;line-height:1.5;white-space:pre-line;opacity:0.9;margin-top:20px;">${escapeHtml(slide.translationText)}</p>` : ''}
+          ${slide.translationText ? `<p id="translation" dir="ltr" style="font-size:${translationFontSize}px;line-height:1.5;white-space:pre-line;opacity:0.9;margin-top:20px;">${escapeHtml(slide.translationText)}</p>` : ''}
           <p style="margin-top:30px;font-size:22px;opacity:0.7;">نور القرآن - nourquran.com</p>
         </body></html>
       `);
@@ -222,33 +222,47 @@ async function generateVideo({
       });
       await page.evaluate(() => {
         const ayah = document.getElementById('ayah-text');
-        const body = document.body;
-        // available height = 1920 - small safety margin
-        const maxBodyHeight = 1880;
-        let fits = false;
-        let finalSize = 70;
-        for (let size = 70; size >= 10; size--) {
-          ayah.style.fontSize = `${size}px`;
-          // force reflow
-          void ayah.offsetHeight;
-          if (body.scrollHeight <= maxBodyHeight && ayah.scrollHeight <= 1600) {
-            finalSize = size;
-            fits = true;
-            break;
+        const translation = document.getElementById('translation');
+        const initialTranslationSize = translation
+          ? Number.parseInt(translation.style.fontSize, 10)
+          : 0;
+
+        const fitsInFrame = () => {
+          const visibleElements = Array.from(document.body.children)
+            .filter(element => getComputedStyle(element).display !== 'none');
+          return visibleElements.every(element => {
+            const bounds = element.getBoundingClientRect();
+            return bounds.top >= 0 && bounds.bottom <= window.innerHeight &&
+              bounds.left >= 0 && bounds.right <= window.innerWidth &&
+              element.scrollHeight <= element.clientHeight + 1 &&
+              element.scrollWidth <= element.clientWidth + 1;
+          });
+        };
+
+        const trySizes = (minAyahSize, maxAyahSize, minTranslationSize) => {
+          for (let ayahSize = maxAyahSize; ; ayahSize = Math.max(ayahSize - 2, minAyahSize)) {
+            ayah.style.fontSize = `${ayahSize}px`;
+            const translationMin = translation ? minTranslationSize : 0;
+            const translationMax = translation ? initialTranslationSize : 0;
+            for (let translationSize = translationMax; ; translationSize = Math.max(translationSize - 2, translationMin)) {
+              if (translation) translation.style.fontSize = `${translationSize}px`;
+              void document.body.offsetHeight;
+              if (fitsInFrame()) return true;
+              if (translationSize === translationMin) break;
+            }
+            if (ayahSize === minAyahSize) break;
           }
-        }
+          return false;
+        };
+
+        let fits = trySizes(14, 70, 10);
         if (!fits) {
-          // Last resort: keep smallest size, allow scrolling check to pass by reducing other elements
-          ayah.style.fontSize = '10px';
-          const header = document.querySelector('p');
-          if (header) header.style.display = 'none';
-          // re-check
-          if (body.scrollHeight <= maxBodyHeight) fits = true;
+          Array.from(document.body.children)
+            .filter(element => element !== ayah && element !== translation)
+            .forEach(element => { element.style.display = 'none'; });
+          fits = trySizes(10, 18, 10);
         }
-        if (!fits) {
-          console.log('DEBUG scroll', {bodyH: body.scrollHeight, ayahH: ayah.scrollHeight, size: finalSize});
-          throw new Error('Ayah text does not fit in the video frame without clipping.');
-        }
+        if (!fits) throw new Error('Ayah text does not fit in the video frame without clipping.');
       });
       await page.screenshot({ path: imagePath });
     }
