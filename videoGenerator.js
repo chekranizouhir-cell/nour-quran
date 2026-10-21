@@ -160,6 +160,7 @@ async function generateVideo({
     }));
   }
   const totalAyahAudioDuration = slides.reduce((total, slide) => total + (slide.audioDuration || 1), 0);
+  const backgroundImageUrls = new Map();
 
   const resolvedFontFile = process.env.FONT_FILE || FONT_FILE;
   if (!fs.existsSync(resolvedFontFile)) {
@@ -231,8 +232,21 @@ async function generateVideo({
       const slideAyahNumber = Number.isInteger(firstAyahNumber) ? firstAyahNumber + index : ayahNumber;
       const category = classifyAyah(slide.ayahText);
       const backgroundImage = getBackgroundPath(category);
+      let backgroundImageUrl;
+      if (backgroundImage) {
+        if (!backgroundImageUrls.has(backgroundImage)) {
+          backgroundImageUrls.set(
+            backgroundImage,
+            `data:image/jpeg;base64,${fs.readFileSync(backgroundImage).toString('base64')}`
+          );
+        }
+        backgroundImageUrl = backgroundImageUrls.get(backgroundImage);
+      }
+      console.log(
+        `[BG] ${category}: ${backgroundImage || 'category gradient fallback'}`
+      );
       const background = backgroundImage
-        ? `linear-gradient(rgba(0, 0, 0, 0.68), rgba(0, 0, 0, 0.68)), url('${pathToFileURL(backgroundImage).href}') center / cover no-repeat`
+        ? `linear-gradient(rgba(0, 0, 0, 0.68), rgba(0, 0, 0, 0.68)), url("${backgroundImageUrl}") center / cover no-repeat`
         : `linear-gradient(rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.35)), ${BACKGROUND_STYLES[category].gradient}`;
       await page.setContent(`
         <html dir="rtl"><body style="background: ${background};">
@@ -243,6 +257,13 @@ async function generateVideo({
         </body></html>
       `);
       await page.addStyleTag({ content: videoCss });
+      if (backgroundImageUrl) {
+        await page.evaluate(async imageUrl => {
+          const image = new Image();
+          image.src = imageUrl;
+          await image.decode();
+        }, backgroundImageUrl);
+      }
       await page.evaluate(() => document.fonts.ready);
       await page.evaluate(() => {
         const ayah = document.getElementById('ayah-text');
