@@ -10,7 +10,7 @@ async function runScheduledPost() {
   }
 
   console.log(
-    `نشر فيديو بمدة متوقعة بين دقيقتين و5 دقايق، موعد ${videoType.time} بتوقيت Asia/Riyadh.`
+    `نشر فيديو Shorts من آية إلى 4 آيات، موعد ${videoType.time} بتوقيت Asia/Riyadh.`
   );
   const result = await autoGenerateAndUpload({
     privacy: 'public'

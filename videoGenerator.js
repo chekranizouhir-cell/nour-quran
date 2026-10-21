@@ -7,32 +7,6 @@ const puppeteer = require('puppeteer');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 
 const FONT_FILE = process.env.FONT_FILE || path.join(__dirname, 'fonts', 'AmiriQuran.ttf');
-const BACKGROUND_DIR = path.join(__dirname, 'assets', 'backgrounds');
-
-const BACKGROUND_STYLES = {
-  jannah: { file: 'jannah.jpg', gradient: 'linear-gradient(145deg, #064e3b, #166534 55%, #052e16)' },
-  jahannam: { file: 'jahannam.jpg', gradient: 'linear-gradient(145deg, #450a0a, #7f1d1d 55%, #1c0a0a)' },
-  sky: { file: 'sky.jpg', gradient: 'linear-gradient(145deg, #0c1445, #1e3a8a 55%, #080d24)' },
-  sea: { file: 'sea.jpg', gradient: 'linear-gradient(145deg, #082f49, #0369a1 55%, #082f49)' },
-  mountains: { file: 'mountains.jpg', gradient: 'linear-gradient(145deg, #292524, #57534e 55%, #1c1917)' },
-  default: { file: 'default.jpg', gradient: 'linear-gradient(145deg, #0a3d2e, #000)' }
-};
-
-function classifyAyah(arabicText) {
-  const normalizedText = String(arabicText).replace(/[\u064B-\u065F\u0670\u06D6-\u06ED]/g, '');
-  if (/(جنة|جنات|نعيم|أنهار|فردوس|عدن)/u.test(normalizedText)) return 'jannah';
-  if (/(نار|جهنم|جحيم|سعير|عذاب|سقر|حريق)/u.test(normalizedText)) return 'jahannam';
-  if (/(سماء|سماوات|نجم|نجوم|قمر|شمس|كوكب|ليل|نهار)/u.test(normalizedText)) return 'sky';
-  if (/(بحر|بحار|موج|سفينة|فلك|ماء)/u.test(normalizedText)) return 'sea';
-  if (/(جبل|جبال|أرض|صخر|تراب|راسية)/u.test(normalizedText)) return 'mountains';
-  return 'default';
-}
-
-function getBackgroundPath(category) {
-  const background = BACKGROUND_STYLES[category] || BACKGROUND_STYLES.default;
-  const filePath = path.join(BACKGROUND_DIR, background.file);
-  return fs.existsSync(filePath) ? filePath : null;
-}
 
 function probeMedia(filePath) {
   const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
@@ -160,7 +134,6 @@ async function generateVideo({
     }));
   }
   const totalAyahAudioDuration = slides.reduce((total, slide) => total + (slide.audioDuration || 1), 0);
-  const backgroundImageUrls = new Map();
 
   const resolvedFontFile = process.env.FONT_FILE || FONT_FILE;
   if (!fs.existsSync(resolvedFontFile)) {
@@ -203,6 +176,7 @@ async function generateVideo({
           padding: 90px 60px 60px;
           box-sizing: border-box;
           overflow: hidden;
+          background: #0a1910;
         }
         h1 {
           width: 100%;
@@ -230,26 +204,8 @@ async function generateVideo({
       const imagePath = path.join(outputDir, `temp_${randomUUID()}.png`);
       imagePaths.push(imagePath);
       const slideAyahNumber = Number.isInteger(firstAyahNumber) ? firstAyahNumber + index : ayahNumber;
-      const category = classifyAyah(slide.ayahText);
-      const backgroundImage = getBackgroundPath(category);
-      let backgroundImageUrl;
-      if (backgroundImage) {
-        if (!backgroundImageUrls.has(backgroundImage)) {
-          backgroundImageUrls.set(
-            backgroundImage,
-            `data:image/jpeg;base64,${fs.readFileSync(backgroundImage).toString('base64')}`
-          );
-        }
-        backgroundImageUrl = backgroundImageUrls.get(backgroundImage);
-      }
-      console.log(
-        `[BG] ${category}: ${backgroundImage || 'category gradient fallback'}`
-      );
-      const background = backgroundImage
-        ? `linear-gradient(rgba(0, 0, 0, 0.68), rgba(0, 0, 0, 0.68)), url("${backgroundImageUrl}") center / cover no-repeat`
-        : `linear-gradient(rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.35)), ${BACKGROUND_STYLES[category].gradient}`;
       await page.setContent(`
-        <html dir="rtl"><body style="background: ${background};">
+        <html dir="rtl"><body>
           <p style="font-size:30px;color:#a7f3d0;margin-bottom:20px;">${escapeHtml(surahName)} - الآية ${escapeHtml(slideAyahNumber)}</p>
           <h1 id="ayah-text">${escapeHtml(slide.ayahText)}</h1>
           ${slide.translationText ? `<p dir="ltr" style="font-size:${translationFontSize}px;line-height:1.5;white-space:pre-line;opacity:0.9;margin-top:35px;">${escapeHtml(slide.translationText)}</p>` : ''}
@@ -257,13 +213,6 @@ async function generateVideo({
         </body></html>
       `);
       await page.addStyleTag({ content: videoCss });
-      if (backgroundImageUrl) {
-        await page.evaluate(async imageUrl => {
-          const image = new Image();
-          image.src = imageUrl;
-          await image.decode();
-        }, backgroundImageUrl);
-      }
       await page.evaluate(() => document.fonts.ready);
       await page.evaluate(() => {
         const ayah = document.getElementById('ayah-text');
@@ -327,7 +276,5 @@ module.exports = {
   generateVideo,
   getAudioDuration,
   validateVideo,
-  classifyAyah,
-  getBackgroundPath,
   FONT_FILE
 };

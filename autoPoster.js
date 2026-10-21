@@ -9,11 +9,10 @@ const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 const { getYoutubeStatus, isYoutubeConfigured } = require('./youtubeService');
 
 const QURAN_API = 'https://api.alquran.cloud/v1/ayah';
-const EVERYAYAH_AUDIO_URLS = [
-  'https://everyayah.com/data/Husary_128kbps',
-  'https://everyayah.com/data/Abu_Bakr_Ash-Shaatree_128kbps'
-];
+const RECITER = 'Husary_128kbps';
+const EVERYAYAH_AUDIO_URL = `https://everyayah.com/data/${RECITER}`;
 const MAX_FETCH_ATTEMPTS = 2;
+const MAX_SHORTS_AYAH_COUNT = 4;
 const OUTPUT_DIR = path.join(__dirname, 'output');
 const SCHEDULE_TIME_ZONE = 'Asia/Riyadh';
 const SCHEDULE_CRONS = {
@@ -27,7 +26,7 @@ const VIDEO_TYPES = [
   { key: 'very-short', label: 'قصير جداً', count: 1 },
   { key: 'short', label: 'قصير', count: 2 },
   { key: 'medium', label: 'متوسط', count: 3 },
-  { key: 'long', label: 'طويل', count: 7 }
+  { key: 'long', label: 'طويل', count: 4 }
 ];
 
 function wait(milliseconds) {
@@ -89,7 +88,7 @@ async function getAyah() {
 }
 
 async function getRandomAyahs(count) {
-  if (!Number.isInteger(count) || count < 1 || count > 25) {
+  if (!Number.isInteger(count) || count < 1 || count > MAX_SHORTS_AYAH_COUNT) {
     throw new Error(`Unsupported number of consecutive ayahs: ${count}`);
   }
 
@@ -130,7 +129,10 @@ async function getRandomAyahsForDuration(targetSeconds = 180) {
   }
 
   const estimatedSecondsPerAyah = 12;
-  const count = Math.max(1, Math.ceil(targetSeconds / estimatedSecondsPerAyah));
+  const count = Math.min(
+    MAX_SHORTS_AYAH_COUNT,
+    Math.max(1, Math.ceil(targetSeconds / estimatedSecondsPerAyah))
+  );
   const surahNumber = Math.floor(Math.random() * 114) + 1;
 
   const [arabicResponse, englishResponse] = await Promise.all([
@@ -157,42 +159,8 @@ async function getRandomAyahsForDuration(targetSeconds = 180) {
 }
 
 async function getRandomAyahsSmart() {
-  const minimumSeconds = 120;
-  const maximumSeconds = 300;
-  const estimatedSecondsPerAyah = 12;
-  const minimumAyahs = Math.ceil(minimumSeconds / estimatedSecondsPerAyah);
-  const maximumAyahs = Math.floor(maximumSeconds / estimatedSecondsPerAyah);
-
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    const count = Math.floor(Math.random() * (maximumAyahs - minimumAyahs + 1)) + minimumAyahs;
-    const surahNumber = Math.floor(Math.random() * 114) + 1;
-    const [arabic, english] = await Promise.all([
-      fetchQuranUrl(`${QURAN_API.replace('/ayah', '/surah')}/${surahNumber}/quran-uthmani`),
-      fetchQuranUrl(`${QURAN_API.replace('/ayah', '/surah')}/${surahNumber}/en.sahih`)
-    ]);
-
-    if (!Array.isArray(arabic.ayahs) || !Array.isArray(english.ayahs) ||
-        english.ayahs.length !== arabic.ayahs.length) {
-      throw new Error(`Quran API returned invalid surah data for surah ${surahNumber}`);
-    }
-    if (arabic.ayahs.length < count) continue;
-
-    const lastStart = arabic.ayahs.length - count;
-    const start = Math.floor(Math.random() * (lastStart + 1));
-    console.log(
-      `اختيار ذكي: ${count} آيات من ${arabic.name} - متوقع حوالي ` +
-      `${(count * estimatedSecondsPerAyah / 60).toFixed(1)} دقيقة`
-    );
-    return arabic.ayahs.slice(start, start + count).map((ayah, index) => ({
-      number: ayah.number,
-      numberInSurah: ayah.numberInSurah,
-      surah: arabic,
-      arabicText: ayah.text.replace(/[\u200B-\u200D\uFEFF]/g, '').trim(),
-      englishText: english.ayahs[start + index].text.trim()
-    }));
-  }
-
-  throw new Error('Could not find a Quran passage estimated to last between 2 and 5 minutes.');
+  const count = Math.floor(Math.random() * MAX_SHORTS_AYAH_COUNT) + 1;
+  return getRandomAyahs(count);
 }
 
 function isMissingFfprobe(error) {
@@ -218,51 +186,47 @@ async function downloadAudio(ayah) {
     }
   }
 
-  const candidates = EVERYAYAH_AUDIO_URLS.map(baseUrl => `${baseUrl}/${surahNumber}${ayahNumber}.mp3`);
+  const audioUrl = `${EVERYAYAH_AUDIO_URL}/${surahNumber}${ayahNumber}.mp3`;
 
-  for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
-    const url = candidates[candidateIndex];
+  for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt += 1) {
+    const temporaryPath = `${audioPath}.${process.pid}.${Date.now()}.${attempt}.part`;
 
-    for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt += 1) {
-      const temporaryPath = `${audioPath}.${process.pid}.${Date.now()}.${candidateIndex}.${attempt}.part`;
+    try {
+      const response = await axios.get(audioUrl, {
+        responseType: 'stream',
+        timeout: 30000,
+        validateStatus: status => status >= 200 && status < 300
+      });
 
-      try {
-        const response = await axios.get(url, {
-          responseType: 'stream',
-          timeout: 30000,
-          validateStatus: status => status >= 200 && status < 300
-        });
+      await pipeline(response.data, fs.createWriteStream(temporaryPath));
+      getAudioDuration(temporaryPath);
+      await fs.promises.rename(temporaryPath, audioPath);
+      return audioPath;
+    } catch (cause) {
+      await fs.promises.rm(temporaryPath, { force: true });
 
-        await pipeline(response.data, fs.createWriteStream(temporaryPath));
-        getAudioDuration(temporaryPath);
-        await fs.promises.rename(temporaryPath, audioPath);
-        return audioPath;
-      } catch (cause) {
-        await fs.promises.rm(temporaryPath, { force: true });
+      if (isMissingFfprobe(cause)) throw cause;
 
-        if (isMissingFfprobe(cause)) throw cause;
-
-        if (fs.existsSync(audioPath)) {
-          try {
-            getAudioDuration(audioPath);
-            return audioPath;
-          } catch (existingAudioError) {
-            if (isMissingFfprobe(existingAudioError)) throw existingAudioError;
-            await fs.promises.rm(audioPath, { force: true });
-          }
+      if (fs.existsSync(audioPath)) {
+        try {
+          getAudioDuration(audioPath);
+          return audioPath;
+        } catch (existingAudioError) {
+          if (isMissingFfprobe(existingAudioError)) throw existingAudioError;
+          await fs.promises.rm(audioPath, { force: true });
         }
-
-        if (attempt === MAX_FETCH_ATTEMPTS) {
-          console.warn(`Source failed for ${url}, trying the next reciter...`);
-          break;
-        }
-
-        await wait(500 * attempt);
       }
+
+      if (attempt === MAX_FETCH_ATTEMPTS) {
+        console.warn(`Source failed for ${audioUrl}.`);
+        break;
+      }
+
+      await wait(500 * attempt);
     }
   }
 
-  throw new Error(`Could not download a valid Quran recitation from any source for ${surahNumber}${ayahNumber}`);
+  throw new Error(`Could not download a valid Husary recitation for ${surahNumber}${ayahNumber}`);
 }
 
 function getRiyadhDateAndTime(date) {
@@ -366,7 +330,7 @@ async function autoGenerateAndUpload({
       translationText,
       `تلاوة من سورة ${firstAyah.surah.name}، الآيات ${firstAyah.numberInSurah}-${lastAyah.numberInSurah}.`,
       'استمع إلى القرآن الكريم وتدبر معانيه.',
-      '#القرآن_الكريم #تلاوة #Quran #Husary'
+      '#القرآن_الكريم #تلاوة #Husary #Quran'
     ].join('\n\n');
 
     return await getYoutubeStatus({
@@ -406,7 +370,7 @@ if (require.main === module) {
       if (!result || result.status !== 'uploaded') {
         throw new Error('YouTube upload did not complete successfully.');
       }
-      console.log('تم الرفع بنجاح Public - المدة المتوقعة بين دقيقتين و5 دقايق');
+      console.log('تم الرفع بنجاح Public - وضع Shorts (من آية إلى 4 آيات)');
     } catch (err) {
       console.error('فشل الرفع:', err);
       process.exitCode = 1;
