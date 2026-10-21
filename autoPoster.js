@@ -89,7 +89,7 @@ async function getAyah() {
 }
 
 async function getRandomAyahs(count) {
-  if (!Number.isInteger(count) || count < 1 || count > 7) {
+  if (!Number.isInteger(count) || count < 1 || count > 25) {
     throw new Error(`Unsupported number of consecutive ayahs: ${count}`);
   }
 
