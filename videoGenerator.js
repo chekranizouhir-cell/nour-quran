@@ -92,7 +92,6 @@ async function generateVideo({
   ayahNumber,
   audioPath,
   outputPath,
-  translationText,
   ayahSlides
 }) {
   if (!ayahText || !surahName || ayahNumber === undefined || ayahNumber === null) {
@@ -110,7 +109,6 @@ async function generateVideo({
   const videoPath = path.resolve(outputPath || path.join(outputDir, `quran_${Date.now()}.mp4`));
   fs.mkdirSync(path.dirname(videoPath), { recursive: true });
   const firstAyahNumber = Number.parseInt(String(ayahNumber).split('-')[0], 10);
-  const normalizedTranslationText = String(translationText || '');
   let slides;
   if (ayahSlides !== undefined) {
     if (!Array.isArray(ayahSlides) || ayahSlides.length === 0 ||
@@ -120,17 +118,11 @@ async function generateVideo({
     }
     slides = ayahSlides.map(slide => ({
       ayahText: slide.text,
-      translationText: String(slide.translationText || ''),
       audioDuration: slide.audioDuration
     }));
   } else {
     const ayahs = String(ayahText).split(/\s+۞\s+/u);
-    const translations = normalizedTranslationText ? normalizedTranslationText.split(/\n\s*\n/) : [];
-    const hasPerAyahTranslations = translations.length === ayahs.length;
-    slides = ayahs.map((text, index) => ({
-      ayahText: text,
-      translationText: hasPerAyahTranslations ? translations[index] : index === 0 ? normalizedTranslationText : ''
-    }));
+    slides = ayahs.map(text => ({ ayahText: text }));
   }
   const totalAyahAudioDuration = slides.reduce((total, slide) => total + (slide.audioDuration || 1), 0);
 
@@ -198,10 +190,6 @@ async function generateVideo({
         }
       `;
     for (const [index, slide] of slides.entries()) {
-      const translationFontSize =
-        slide.translationText.length > 1200 ? 15
-          : slide.translationText.length > 700 ? 18
-            : slide.translationText.length > 300 ? 22 : 28;
       const imagePath = path.join(outputDir, `temp_${randomUUID()}.png`);
       imagePaths.push(imagePath);
       const slideAyahNumber = Number.isInteger(firstAyahNumber) ? firstAyahNumber + index : ayahNumber;
@@ -209,7 +197,6 @@ async function generateVideo({
         <html dir="rtl"><body>
           <p style="font-size:26px;color:#a7f3d0;margin-bottom:15px;">${escapeHtml(surahName)} - الآية ${escapeHtml(slideAyahNumber)}</p>
           <h1 id="ayah-text">${escapeHtml(slide.ayahText)}</h1>
-          ${slide.translationText ? `<p id="translation" dir="ltr" style="font-size:${translationFontSize}px;line-height:1.5;white-space:pre-line;opacity:0.9;margin-top:20px;">${escapeHtml(slide.translationText)}</p>` : ''}
           <p style="margin-top:30px;font-size:22px;opacity:0.7;">نور القرآن - nourquran.com</p>
         </body></html>
       `);
@@ -222,11 +209,6 @@ async function generateVideo({
       });
       await page.evaluate(() => {
         const ayah = document.getElementById('ayah-text');
-        const translation = document.getElementById('translation');
-        const initialTranslationSize = translation
-          ? Number.parseInt(translation.style.fontSize, 10)
-          : 0;
-
         const fitsInFrame = () => {
           const visibleElements = Array.from(document.body.children)
             .filter(element => getComputedStyle(element).display !== 'none');
@@ -239,28 +221,22 @@ async function generateVideo({
           });
         };
 
-        const trySizes = (minAyahSize, maxAyahSize, minTranslationSize) => {
-          for (let ayahSize = maxAyahSize; ; ayahSize = Math.max(ayahSize - 2, minAyahSize)) {
-            ayah.style.fontSize = `${ayahSize}px`;
-            const translationMin = translation ? minTranslationSize : 0;
-            const translationMax = translation ? initialTranslationSize : 0;
-            for (let translationSize = translationMax; ; translationSize = Math.max(translationSize - 2, translationMin)) {
-              if (translation) translation.style.fontSize = `${translationSize}px`;
-              void document.body.offsetHeight;
-              if (fitsInFrame()) return true;
-              if (translationSize === translationMin) break;
-            }
-            if (ayahSize === minAyahSize) break;
+        const trySizes = (minSize, maxSize) => {
+          for (let size = maxSize; ; size = Math.max(size - 2, minSize)) {
+            ayah.style.fontSize = `${size}px`;
+            void document.body.offsetHeight;
+            if (fitsInFrame()) return true;
+            if (size === minSize) break;
           }
           return false;
         };
 
-        let fits = trySizes(14, 70, 10);
+        let fits = trySizes(10, 90);
         if (!fits) {
           Array.from(document.body.children)
-            .filter(element => element !== ayah && element !== translation)
+            .filter(element => element !== ayah)
             .forEach(element => { element.style.display = 'none'; });
-          fits = trySizes(10, 18, 10);
+          fits = trySizes(10, 18);
         }
         if (!fits) throw new Error('Ayah text does not fit in the video frame without clipping.');
       });
