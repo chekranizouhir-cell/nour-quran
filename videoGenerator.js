@@ -209,36 +209,12 @@ async function generateVideo({
       });
       await page.evaluate(() => {
         const ayah = document.getElementById('ayah-text');
-        const fitsInFrame = () => {
-          const visibleElements = Array.from(document.body.children)
-            .filter(element => getComputedStyle(element).display !== 'none');
-          return visibleElements.every(element => {
-            const bounds = element.getBoundingClientRect();
-            return bounds.top >= 0 && bounds.bottom <= window.innerHeight &&
-              bounds.left >= 0 && bounds.right <= window.innerWidth &&
-              element.scrollHeight <= element.clientHeight + 1 &&
-              element.scrollWidth <= element.clientWidth + 1;
-          });
-        };
-
-        const trySizes = (minSize, maxSize) => {
-          for (let size = maxSize; ; size = Math.max(size - 2, minSize)) {
-            ayah.style.fontSize = `${size}px`;
-            void document.body.offsetHeight;
-            if (fitsInFrame()) return true;
-            if (size === minSize) break;
-          }
-          return false;
-        };
-
-        let fits = trySizes(10, 90);
-        if (!fits) {
-          Array.from(document.body.children)
-            .filter(element => element !== ayah)
-            .forEach(element => { element.style.display = 'none'; });
-          fits = trySizes(10, 18);
+        const body = document.body;
+        for (let size = 90; size >= 12; size -= 2) {
+          ayah.style.fontSize = `${size}px`;
+          void body.offsetHeight;
+          if (body.scrollHeight <= 1920) break;
         }
-        if (!fits) throw new Error('Ayah text does not fit in the video frame without clipping.');
       });
       await page.screenshot({ path: imagePath });
     }
