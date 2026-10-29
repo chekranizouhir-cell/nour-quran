@@ -7,14 +7,14 @@ const { generateVideo, getAudioDuration } = require('./videoGenerator');
 const { getYoutubeStatus, isYoutubeConfigured } = require('./youtubeService');
 
 const QURAN_API = 'https://api.alquran.cloud/v1/ayah';
-const RECITERS = [
+const FREE_RECITERS = [
   {
     name: 'Yasser Al-Dossari',
     folder: 'https://server11.mp3quran.net/yasser/',
     id: 'yasser'
   }
 ];
-const BLACKLIST = ['husr', 'Hosary', 'Mahmoud_Khalil', 'Al-Hussary'];
+const BLACKLIST = [];
 const MAX_FETCH_ATTEMPTS = 2;
 const MAX_SHORTS_AYAH_COUNT = 4;
 const OUTPUT_DIR = path.join(__dirname, 'output');
@@ -177,7 +177,7 @@ function getAvailableReciters() {
   const blocked = BLACKLIST
     .map(value => value.toLowerCase().replace(/[^a-z0-9]/g, ''))
     .filter(Boolean);
-  return RECITERS.filter(reciter => {
+  return FREE_RECITERS.filter(reciter => {
     const identifiers = [reciter.id, reciter.name, reciter.folder]
       .map(value => value.toLowerCase().replace(/[^a-z0-9]/g, ''));
     return !blocked.some(entry =>
@@ -359,7 +359,7 @@ module.exports = {
   getDailyReciter,
   getDailyVideoType,
   isYoutubeConfigured,
-  RECITERS,
+  FREE_RECITERS,
   BLACKLIST,
   scheduleCrons: Object.keys(SCHEDULE_CRONS)
 };
