@@ -1,16 +1,20 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
-const { randomUUID, createHash } = require('crypto');
+const { createHash } = require('crypto');
 const { pipeline } = require('stream/promises');
 const { generateVideo, getAudioDuration } = require('./videoGenerator');
-const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 const { getYoutubeStatus, isYoutubeConfigured } = require('./youtubeService');
 
 const QURAN_API = 'https://api.alquran.cloud/v1/ayah';
-const RECITER = 'Husary_128kbps';
-const EVERYAYAH_AUDIO_URL = `https://everyayah.com/data/${RECITER}`;
+const RECITERS = [
+  {
+    name: 'Yasser Al-Dossari',
+    folder: 'https://server11.mp3quran.net/yasser/',
+    id: 'yasser'
+  }
+];
+const BLACKLIST = ['husr', 'Hosary', 'Mahmoud_Khalil', 'Al-Hussary'];
 const MAX_FETCH_ATTEMPTS = 2;
 const MAX_SHORTS_AYAH_COUNT = 4;
 const OUTPUT_DIR = path.join(__dirname, 'output');
@@ -169,11 +173,42 @@ function isMissingFfprobe(error) {
   return isMissingFfprobe(error.cause);
 }
 
-async function downloadAudio(ayah) {
+function getAvailableReciters() {
+  const blocked = BLACKLIST
+    .map(value => value.toLowerCase().replace(/[^a-z0-9]/g, ''))
+    .filter(Boolean);
+  return RECITERS.filter(reciter => {
+    const identifiers = [reciter.id, reciter.name, reciter.folder]
+      .map(value => value.toLowerCase().replace(/[^a-z0-9]/g, ''));
+    return !blocked.some(entry =>
+      identifiers.some(identifier => identifier.includes(entry))
+    );
+  });
+}
+
+function getDailyReciter(date = new Date()) {
+  const reciters = getAvailableReciters();
+  if (reciters.length === 0) {
+    throw new Error('No reciters are available after applying the blacklist.');
+  }
+
+  const localDate = getRiyadhDateAndTime(date).date;
+  const dayHash = createHash('sha256').update(localDate).digest().readUInt32BE(0);
+  return reciters[dayHash % reciters.length];
+}
+
+async function downloadSurahAudio(surah, reciter = getDailyReciter()) {
+  if (!surah || !Number.isInteger(surah.number) || surah.number < 1 || surah.number > 114) {
+    throw new Error(`Unsupported surah number: ${surah && surah.number}`);
+  }
+  if (!getAvailableReciters().some(available => available.id === reciter.id)) {
+    throw new Error(`Reciter is unavailable or blacklisted: ${reciter.name || reciter.id}`);
+  }
+
+  const surahNumber = String(surah.number).padStart(3, '0');
+  const audioPath = path.join(OUTPUT_DIR, `surah_audio_${reciter.id}_${surahNumber}.mp3`);
+
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-  const surahNumber = String(ayah.surah.number).padStart(3, '0');
-  const ayahNumber = String(ayah.numberInSurah).padStart(3, '0');
-  const audioPath = path.join(OUTPUT_DIR, `audio_${surahNumber}${ayahNumber}.mp3`);
 
   if (fs.existsSync(audioPath)) {
     try {
@@ -186,7 +221,7 @@ async function downloadAudio(ayah) {
     }
   }
 
-  const audioUrl = `${EVERYAYAH_AUDIO_URL}/${surahNumber}${ayahNumber}.mp3`;
+  const audioUrl = `${reciter.folder}${surahNumber}.mp3`;
 
   for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt += 1) {
     const temporaryPath = `${audioPath}.${process.pid}.${Date.now()}.${attempt}.part`;
@@ -226,7 +261,7 @@ async function downloadAudio(ayah) {
     }
   }
 
-  throw new Error(`Could not download a valid Husary recitation for ${surahNumber}${ayahNumber}`);
+  throw new Error(`Could not download a valid ${reciter.name} recitation for surah ${surahNumber}`);
 }
 
 function getRiyadhDateAndTime(date) {
@@ -270,96 +305,62 @@ async function autoGenerateAndUpload({
   ayahCount,
   targetDurationSeconds
 } = {}) {
-  const ayahs = targetDurationSeconds !== undefined
-    ? await getRandomAyahsForDuration(targetDurationSeconds)
-    : ayahCount !== undefined
-      ? await getRandomAyahs(ayahCount)
-      : await getRandomAyahsSmart();
-  const firstAyah = ayahs[0];
-  const lastAyah = ayahs[ayahs.length - 1];
-  console.log(
-    'كيولد:',
-    firstAyah.surah.englishName,
-    `${firstAyah.numberInSurah}-${lastAyah.numberInSurah}`,
-    `(${ayahs.length} آيات)`
-  );
-
-  const audioPaths = await Promise.all(ayahs.map(downloadAudio));
-  let combinedAudioPath;
-  let audioPath = audioPaths[0];
-  try {
-    if (audioPaths.length > 1) {
-      combinedAudioPath = path.join(OUTPUT_DIR, `combined_${randomUUID()}.mp3`);
-      const inputs = audioPaths.flatMap(file => ['-i', file]);
-      const audioLabels = audioPaths.map((_, index) => `[${index}:a]`).join('');
-      execFileSync(ffmpegInstaller.path, [
-        '-y',
-        ...inputs,
-        '-filter_complex', `${audioLabels}concat=n=${audioPaths.length}:v=0:a=1[out]`,
-        '-map', '[out]',
-        '-c:a', 'libmp3lame',
-        '-q:a', '2',
-        combinedAudioPath
-      ], { stdio: 'inherit' });
-      getAudioDuration(combinedAudioPath);
-      audioPath = combinedAudioPath;
-    }
-
-    const ayahText = ayahs.map(ayah => ayah.arabicText).join(' ۞ ');
-    const translationText = ayahs.map(ayah => ayah.englishText).join('\n\n');
-    const filePath = await generateVideo({
-      ayahText,
-      surahName: firstAyah.surah.name,
-      ayahNumber: firstAyah.numberInSurah === lastAyah.numberInSurah
-        ? firstAyah.numberInSurah
-        : `${firstAyah.numberInSurah}-${lastAyah.numberInSurah}`,
-      translationText,
-      audioPath,
-      ayahSlides: ayahs.map((ayah, index) => ({
-        text: ayah.arabicText,
-        translationText: ayah.englishText,
-        audioDuration: getAudioDuration(audioPaths[index])
-      }))
-    });
-
-    const fullTitle =
-      `${ayahText} - ${firstAyah.surah.name} الآيات ${firstAyah.numberInSurah}-${lastAyah.numberInSurah} | تلاوة قرآنية`;
-    const title = Array.from(fullTitle).slice(0, 100).join('');
-    const description = [
-      ayahText,
-      translationText,
-      `تلاوة من سورة ${firstAyah.surah.name}، الآيات ${firstAyah.numberInSurah}-${lastAyah.numberInSurah}.`,
-      'استمع إلى القرآن الكريم وتدبر معانيه.',
-      '#القرآن_الكريم #تلاوة #Husary #Quran'
-    ].join('\n\n');
-
-    return await getYoutubeStatus({
-      filePath,
-      title,
-      description,
-      tags: ['القرآن الكريم', 'تلاوة قرآنية', 'Quran', 'Husary'],
-      privacy
-    });
-  } finally {
-    if (combinedAudioPath && fs.existsSync(combinedAudioPath)) {
-      try {
-        fs.unlinkSync(combinedAudioPath);
-      } catch (error) {
-        console.error(`Could not remove temporary combined audio ${combinedAudioPath}:`, error);
-      }
-    }
+  if (ayahCount !== undefined || targetDurationSeconds !== undefined) {
+    throw new Error('Ayah-count and target-duration options are not supported for full-surah videos.');
   }
+
+  const surahNumber = Math.floor(Math.random() * 114) + 1;
+  const arabicSurah = await fetchQuranUrl(
+    `${QURAN_API.replace('/ayah', '/surah')}/${surahNumber}/quran-uthmani`
+  );
+  if (!Array.isArray(arabicSurah.ayahs) || arabicSurah.ayahs.length === 0) {
+    throw new Error(`Quran API returned invalid surah data for surah ${surahNumber}`);
+  }
+
+  const reciter = getDailyReciter();
+  const audioPath = await downloadSurahAudio({ number: surahNumber }, reciter);
+  console.log(`كيولد سورة ${arabicSurah.name} كاملة بصوت ${reciter.name}.`);
+
+  const filePath = await generateVideo({
+    surahName: arabicSurah.name,
+    ayahNumber: 1,
+    audioPath,
+    cover: {
+      title: `سورة ${arabicSurah.name}`,
+      subtitle: `تلاوة كاملة بصوت ${reciter.name}`
+    }
+  });
+
+  const fullTitle = `تلاوة كاملة من سورة ${arabicSurah.name} بصوت ${reciter.name} | القرآن الكريم`;
+  const title = Array.from(fullTitle).slice(0, 100).join('');
+  const description = [
+    `تلاوة كاملة من سورة ${arabicSurah.name} بصوت ${reciter.name}.`,
+    'استمع إلى القرآن الكريم وتدبر معانيه.',
+    '#القرآن_الكريم #تلاوة #Quran'
+  ].join('\n\n');
+
+  return await getYoutubeStatus({
+    filePath,
+    title,
+    description,
+    tags: ['القرآن الكريم', 'تلاوة قرآنية', 'Quran', reciter.name],
+    privacy
+  });
 }
 
 module.exports = {
   autoGenerateAndUpload,
-  downloadAudio,
+  downloadSurahAudio,
   getAyah,
   getRandomAyahs,
   getRandomAyahsForDuration,
   getRandomAyahsSmart,
+  getAvailableReciters,
+  getDailyReciter,
   getDailyVideoType,
   isYoutubeConfigured,
+  RECITERS,
+  BLACKLIST,
   scheduleCrons: Object.keys(SCHEDULE_CRONS)
 };
 // هذا هو اللي غادي يخلي GitHub Actions يخدم
@@ -370,7 +371,7 @@ if (require.main === module) {
       if (!result || result.status !== 'uploaded') {
         throw new Error('YouTube upload did not complete successfully.');
       }
-      console.log('تم الرفع بنجاح Public - وضع Shorts (من آية إلى 4 آيات)');
+      console.log('تم رفع تلاوة السورة كاملة بنجاح Public.');
     } catch (err) {
       console.error('فشل الرفع:', err);
       process.exitCode = 1;

@@ -2,7 +2,7 @@ const { autoGenerateAndUpload, getDailyVideoType, isYoutubeConfigured } = requir
 
 async function runScheduledPost() {
   const schedule = process.env.GITHUB_EVENT_SCHEDULE;
-  const videoType = getDailyVideoType(schedule);
+  const scheduleSlot = getDailyVideoType(schedule);
   if (!isYoutubeConfigured()) {
     throw new Error(
       'YouTube is not configured. Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN to GitHub Actions secrets.'
@@ -10,7 +10,7 @@ async function runScheduledPost() {
   }
 
   console.log(
-    `نشر فيديو Shorts من آية إلى 4 آيات، موعد ${videoType.time} بتوقيت Asia/Riyadh.`
+    `نشر تلاوة سورة كاملة، موعد ${scheduleSlot.time} بتوقيت Asia/Riyadh.`
   );
   const result = await autoGenerateAndUpload({
     privacy: 'public'

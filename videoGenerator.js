@@ -92,10 +92,16 @@ async function generateVideo({
   ayahNumber,
   audioPath,
   outputPath,
-  ayahSlides
+  ayahSlides,
+  cover
 }) {
-  if (!ayahText || !surahName || ayahNumber === undefined || ayahNumber === null) {
-    throw new Error('Ayah text, surah name, and ayah number are required.');
+  if ((!ayahText && !cover) || !surahName ||
+      (!cover && (ayahNumber === undefined || ayahNumber === null))) {
+    throw new Error('Ayah content or a surah cover, along with a surah name, is required.');
+  }
+  if (cover && (typeof cover.title !== 'string' || !cover.title.trim() ||
+      typeof cover.subtitle !== 'string' || !cover.subtitle.trim())) {
+    throw new Error('A surah cover must contain a title and subtitle.');
   }
   if (!audioPath || !fs.existsSync(audioPath)) {
     throw new Error('A valid recitation audio file is required; silent videos are not generated.');
@@ -110,7 +116,9 @@ async function generateVideo({
   fs.mkdirSync(path.dirname(videoPath), { recursive: true });
   const firstAyahNumber = Number.parseInt(String(ayahNumber).split('-')[0], 10);
   let slides;
-  if (ayahSlides !== undefined) {
+  if (cover) {
+    slides = [{ ayahText: cover.title }];
+  } else if (ayahSlides !== undefined) {
     if (!Array.isArray(ayahSlides) || ayahSlides.length === 0 ||
         ayahSlides.some(slide => !slide || typeof slide.text !== 'string' || !slide.text.trim() ||
           !Number.isFinite(slide.audioDuration) || slide.audioDuration <= 0)) {
@@ -140,7 +148,7 @@ async function generateVideo({
   let browser;
   let ffmpegStarted = false;
   try {
-    console.log('1. كنصور الآية القرآنية...');
+    console.log('1. كنصور محتوى الفيديو القرآني...');
     const launchOptions = { headless: true, args: ['--no-sandbox'] };
     if (process.env.BROWSER_EXECUTABLE_PATH) {
       launchOptions.executablePath = process.env.BROWSER_EXECUTABLE_PATH;
@@ -195,7 +203,9 @@ async function generateVideo({
       const slideAyahNumber = Number.isInteger(firstAyahNumber) ? firstAyahNumber + index : ayahNumber;
       await page.setContent(`
         <html dir="rtl"><body>
-          <p style="font-size:26px;color:#a7f3d0;margin-bottom:15px;">${escapeHtml(surahName)} - الآية ${escapeHtml(slideAyahNumber)}</p>
+          <p style="font-size:26px;color:#a7f3d0;margin-bottom:15px;">${cover
+            ? escapeHtml(cover.subtitle)
+            : `${escapeHtml(surahName)} - الآية ${escapeHtml(slideAyahNumber)}`}</p>
           <h1 id="ayah-text">${escapeHtml(slide.ayahText)}</h1>
           <p style="margin-top:30px;font-size:22px;opacity:0.7;">نور القرآن - nourquran.com</p>
         </body></html>
