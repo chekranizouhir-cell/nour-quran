@@ -2,7 +2,10 @@ const { autoGenerateAndUpload, getScheduledContentType, isYoutubeConfigured } = 
 
 async function runScheduledPost() {
   const schedule = process.env.GITHUB_EVENT_SCHEDULE;
-  const type = getScheduledContentType(schedule);
+  const scheduledType = getScheduledContentType(schedule);
+  const type = scheduledType === 'quran'
+    ? process.env.QURAN_VIDEO_TYPE || 'quran-short'
+    : scheduledType;
   if (!isYoutubeConfigured()) {
     throw new Error(
       'YouTube is not configured. Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN to GitHub Actions secrets.'

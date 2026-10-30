@@ -48,4 +48,5 @@ jobs:
           FFPROBE_PATH: /usr/bin/ffprobe
           FONT_FILE: ${{ github.workspace }}/assets/fonts/Amiri-Regular.ttf
           GITHUB_EVENT_SCHEDULE: ${{ github.event.schedule }}
+          QURAN_VIDEO_TYPE: ${{ vars.QURAN_VIDEO_TYPE }}
         run: node runScheduledPost.js
