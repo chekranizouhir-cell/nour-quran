@@ -2,7 +2,7 @@ name: Nour Quran Auto Poster
 
 on:
   schedule:
-    - cron: '0 5,12,15,21 * * *'  # 08:00, 15:00, 18:00, 00:00 Asia/Riyadh
+    - cron: '0 23,5,9,13,17,21 * * *' # 00:00, 06:00, 10:00, 14:00, 18:00, 22:00 Morocco time (UTC+1)
   workflow_dispatch:
 
 jobs:
@@ -26,6 +26,9 @@ jobs:
       - name: Install FFmpeg and ffprobe
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
+      - name: Install Arabic text-to-speech
+        run: sudo apt-get install -y espeak-ng
+
       - name: Install Chrome for Puppeteer and set BROWSER_EXECUTABLE_PATH
         run: |
           npx puppeteer@latest browsers install chrome
@@ -44,4 +47,5 @@ jobs:
           GOOGLE_REDIRECT_URI: ${{ secrets.GOOGLE_REDIRECT_URI }}
           FFPROBE_PATH: /usr/bin/ffprobe
           FONT_FILE: ${{ github.workspace }}/assets/fonts/Amiri-Regular.ttf
-        run: node autoPoster.js
+          GITHUB_EVENT_SCHEDULE: ${{ github.event.schedule }}
+        run: node runScheduledPost.js

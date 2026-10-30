@@ -2,10 +2,13 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const { createHash } = require('crypto');
+const { execFile } = require('child_process');
 const { pipeline } = require('stream/promises');
+const { promisify } = require('util');
 const { generateVideo, getAudioDuration } = require('./videoGenerator');
 const { getYoutubeStatus, isYoutubeConfigured } = require('./youtubeService');
 
+const execFileAsync = promisify(execFile);
 const QURAN_API = 'https://api.alquran.cloud/v1/ayah';
 const FREE_RECITERS = [
   {
@@ -20,18 +23,14 @@ const MAX_SHORTS_AYAH_COUNT = 4;
 const OUTPUT_DIR = path.join(__dirname, 'output');
 const SCHEDULE_TIME_ZONE = 'Asia/Riyadh';
 const SCHEDULE_CRONS = {
-  '0 5 * * *': '08:00',
-  '0 12 * * *': '15:00',
-  '0 15 * * *': '18:00',
-  '0 21 * * *': '00:00'
+  '0 23 * * *': '00:00',
+  '0 5 * * *': '06:00',
+  '0 9 * * *': '10:00',
+  '0 13 * * *': '14:00',
+  '0 17 * * *': '18:00',
+  '0 21 * * *': '22:00'
 };
-// Use a single 'count' property (was mixed with ayahCount previously)
-const VIDEO_TYPES = [
-  { key: 'very-short', label: 'قصير جداً', count: 1 },
-  { key: 'short', label: 'قصير', count: 2 },
-  { key: 'medium', label: 'متوسط', count: 3 },
-  { key: 'long', label: 'طويل', count: 4 }
-];
+const CONTENT_DATA_DIR = path.join(__dirname, 'data');
 
 function wait(milliseconds) {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -285,28 +284,120 @@ function getRiyadhDateAndTime(date) {
   };
 }
 
-function getDailyVideoType(scheduleCron, date = new Date()) {
-  const time = SCHEDULE_CRONS[scheduleCron];
-  if (!time) throw new Error(`Unsupported GitHub Actions schedule: ${scheduleCron}`);
+function getMoroccoHour(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Casablanca',
+    hour: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(date);
+  const hour = Number(parts.find(part => part.type === 'hour')?.value);
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+    throw new Error('Could not determine the current hour in Morocco.');
+  }
+  return hour;
+}
 
-  const slotIndex = Object.values(SCHEDULE_CRONS).indexOf(time);
-  const localDate = getRiyadhDateAndTime(date).date;
-  const shuffledTypes = VIDEO_TYPES.slice().sort((left, right) => {
-    const leftHash = createHash('sha256').update(`${localDate}:${left.key}`).digest('hex');
-    const rightHash = createHash('sha256').update(`${localDate}:${right.key}`).digest('hex');
-    return leftHash.localeCompare(rightHash);
-  });
-  const chosen = shuffledTypes[slotIndex];
-  return { ...chosen, time, date: localDate, count: chosen.count || chosen.ayahCount };
+function getScheduledContentType(scheduleCron, date = new Date()) {
+  const time = scheduleCron ? SCHEDULE_CRONS[scheduleCron] : undefined;
+  if (scheduleCron && !time) {
+    throw new Error(`Unsupported GitHub Actions schedule: ${scheduleCron}`);
+  }
+
+  if (time === '06:00') return 'sabah';
+  if (time === '18:00') return 'masae';
+
+  if (!scheduleCron) {
+    const hour = getMoroccoHour(date);
+    if (hour >= 5 && hour <= 8) return 'sabah';
+    if (hour >= 17 && hour <= 20) return 'masae';
+  }
+
+  return Math.random() > 0.5 ? 'hadith' : 'quran';
+}
+
+function getRandomTextEntry(type) {
+  if (type === 'hadith') {
+    const hadiths = JSON.parse(fs.readFileSync(path.join(CONTENT_DATA_DIR, 'hadith.json'), 'utf8'));
+    if (!Array.isArray(hadiths) || hadiths.length === 0 ||
+        hadiths.some(entry => !entry || typeof entry.text !== 'string' ||
+          !entry.text.trim() || typeof entry.source !== 'string' || !entry.source.trim())) {
+      throw new Error('data/hadith.json must contain hadith entries with text and source.');
+    }
+    return hadiths[Math.floor(Math.random() * hadiths.length)];
+  }
+
+  if (type === 'sabah' || type === 'masae') {
+    const adkar = JSON.parse(fs.readFileSync(path.join(CONTENT_DATA_DIR, 'adkar.json'), 'utf8'));
+    const entries = adkar[type];
+    if (!Array.isArray(entries) || entries.length === 0 ||
+        entries.some(entry => typeof entry !== 'string' || !entry.trim())) {
+      throw new Error(`data/adkar.json must contain non-empty strings in "${type}".`);
+    }
+    return {
+      text: entries[Math.floor(Math.random() * entries.length)],
+      source: type === 'sabah' ? 'أذكار الصباح' : 'أذكار المساء'
+    };
+  }
+
+  throw new Error(`Unsupported scheduled content type: ${type}`);
+}
+
+async function generateArabicNarration(text) {
+  const audioPath = path.join(OUTPUT_DIR, `narration_${process.pid}_${Date.now()}.wav`);
+  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+  try {
+    await execFileAsync('espeak-ng', ['-v', 'ar', '-s', '135', '-w', audioPath, text]);
+    getAudioDuration(audioPath);
+    return audioPath;
+  } catch (cause) {
+    await fs.promises.rm(audioPath, { force: true });
+    throw new Error('Could not generate Arabic narration with eSpeak NG.', { cause });
+  }
 }
 
 async function autoGenerateAndUpload({
   privacy = 'private',
   ayahCount,
-  targetDurationSeconds
+  targetDurationSeconds,
+  type = 'quran'
 } = {}) {
   if (ayahCount !== undefined || targetDurationSeconds !== undefined) {
     throw new Error('Ayah-count and target-duration options are not supported for full-surah videos.');
+  }
+
+  if (type !== 'quran' && type !== 'hadith' && type !== 'sabah' && type !== 'masae') {
+    throw new Error(`Unsupported video type: ${type}`);
+  }
+
+  if (type !== 'quran') {
+    const entry = getRandomTextEntry(type);
+    const audioPath = await generateArabicNarration(entry.text);
+    try {
+      const filePath = await generateVideo({
+        surahName: type === 'hadith' ? 'حديث نبوي' : 'الأذكار',
+        audioPath,
+        cover: { title: entry.text, subtitle: entry.source }
+      });
+      const isHadith = type === 'hadith';
+      const title = isHadith ? 'حديث نبوي شريف | نور القرآن' : `${entry.source} | نور القرآن`;
+      const description = [
+        entry.text,
+        isHadith ? `المصدر: ${entry.source}` : '',
+        '#نور_القرآن #أذكار #حديث'
+      ].filter(Boolean).join('\n\n');
+
+      return await getYoutubeStatus({
+        filePath,
+        title,
+        description,
+        tags: isHadith
+          ? ['حديث نبوي', 'السنة النبوية', 'نور القرآن']
+          : ['أذكار الصباح والمساء', 'ذكر الله', 'نور القرآن'],
+        privacy
+      });
+    } finally {
+      await fs.promises.rm(audioPath, { force: true });
+    }
   }
 
   const surahNumber = Math.floor(Math.random() * 114) + 1;
@@ -357,7 +448,8 @@ module.exports = {
   getRandomAyahsSmart,
   getAvailableReciters,
   getDailyReciter,
-  getDailyVideoType,
+  getScheduledContentType,
+  getRandomTextEntry,
   isYoutubeConfigured,
   FREE_RECITERS,
   BLACKLIST,

@@ -1,19 +1,18 @@
-const { autoGenerateAndUpload, getDailyVideoType, isYoutubeConfigured } = require('./autoPoster');
+const { autoGenerateAndUpload, getScheduledContentType, isYoutubeConfigured } = require('./autoPoster');
 
 async function runScheduledPost() {
   const schedule = process.env.GITHUB_EVENT_SCHEDULE;
-  const scheduleSlot = getDailyVideoType(schedule);
+  const type = getScheduledContentType(schedule);
   if (!isYoutubeConfigured()) {
     throw new Error(
       'YouTube is not configured. Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN to GitHub Actions secrets.'
     );
   }
 
-  console.log(
-    `نشر تلاوة سورة كاملة، موعد ${scheduleSlot.time} بتوقيت Asia/Riyadh.`
-  );
+  console.log(`نوع المحتوى: ${type}؛ التوقيت المحلي: Africa/Casablanca.`);
   const result = await autoGenerateAndUpload({
-    privacy: 'public'
+    privacy: 'public',
+    type
   });
   if (!result || result.status !== 'uploaded') {
     throw new Error('Scheduled YouTube upload did not complete successfully.');
