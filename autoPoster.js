@@ -33,7 +33,8 @@ const FREE_RECITERS = [
 const BLACKLIST = [];
 const MAX_FETCH_ATTEMPTS = 2;
 const MAX_SHORTS_AYAH_COUNT = 4;
-const TARGET_QURAN_VIDEO_DURATION_SECONDS = 180;
+const MIN_SHORT_DURATION_SECONDS = 120;
+const MAX_SHORT_DURATION_SECONDS = 179;
 const MAX_DURATION_PASSAGE_ATTEMPTS = 5;
 const MAX_DURATION_PASSAGE_AYAH_COUNT = 50;
 const OUTPUT_DIR = path.join(__dirname, 'output');
@@ -220,7 +221,7 @@ async function downloadAyahAudio(ayah, reciter) {
   throw new Error(`Could not download a valid recitation for ayah ${surahNumber}${ayahNumber}.`);
 }
 
-async function getRandomAyahPassageWithAudio(targetSeconds = TARGET_QURAN_VIDEO_DURATION_SECONDS) {
+async function getRandomAyahPassageWithAudio(targetSeconds) {
   if (!Number.isFinite(targetSeconds) || targetSeconds <= 0) {
     throw new Error(`Unsupported duration in seconds: ${targetSeconds}`);
   }
@@ -273,6 +274,8 @@ async function getRandomAyahPassageWithAudio(targetSeconds = TARGET_QURAN_VIDEO_
       }
       const nextDuration = totalDuration + audio.duration;
 
+      if (nextDuration > MAX_SHORT_DURATION_SECONDS) break;
+
       if (passage.length > 0 &&
           Math.abs(targetSeconds - totalDuration) <= Math.abs(targetSeconds - nextDuration)) {
         break;
@@ -291,7 +294,7 @@ async function getRandomAyahPassageWithAudio(targetSeconds = TARGET_QURAN_VIDEO_
       if (totalDuration >= targetSeconds) break;
     }
 
-    if (downloadFailed || !passage.length) continue;
+    if (downloadFailed || !passage.length || totalDuration < MIN_SHORT_DURATION_SECONDS) continue;
 
     if (!bestPassage ||
         Math.abs(targetSeconds - totalDuration) <
@@ -513,8 +516,10 @@ async function generateArabicNarration(text) {
 }
 
 async function generateShortQuranVideoAndUpload(privacy) {
+  const targetSeconds = Math.floor(Math.random() * 60) + MIN_SHORT_DURATION_SECONDS;
+  console.log(`🎯 الهدف ديال هاد الفيديو: ${targetSeconds} ثانية`);
   const { ayahs, totalDuration, reciter } =
-    await getRandomAyahPassageWithAudio(TARGET_QURAN_VIDEO_DURATION_SECONDS);
+    await getRandomAyahPassageWithAudio(targetSeconds);
   const firstAyah = ayahs[0];
   const lastAyah = ayahs[ayahs.length - 1];
   const combinedAudioPath = path.join(OUTPUT_DIR, `combined_${randomUUID()}.mp3`);
