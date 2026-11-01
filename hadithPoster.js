@@ -78,24 +78,16 @@ function create(id = 1) {
     text = `${text.slice(0, 350)}...`;
   }
 
-  const nasheed = `${ASSETS_DIR}/tala-al-badru-vocal.mp3`;
-  const hasNasheed = fs.existsSync(nasheed);
   const out = `${OUTPUT_DIR}/hadith-${h.id || id}.mp4`;
   const fontOpt = font ? `:fontfile=${font}` : '';
   const vf = `drawtext=text='${text}'${fontOpt}:fontsize=36:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2:box=1:boxcolor=black@0.65:boxborderw=28:line_spacing=10`;
 
-  let cmd;
-  if (hasNasheed) {
-    log('🎵 مع النشيد: طلع البدر علينا');
-    cmd = `ffmpeg -loop 1 -i ${bg} -i ${nasheed} -vf "${vf}" -t 12 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest -y ${out}`;
-  } else {
-    log('🔇 صامت - كتابة فقط - تراث 1400 سنة بلا حقوق');
-    cmd = `ffmpeg -loop 1 -i ${bg} -vf "${vf}" -t 12 -c:v libx264 -pix_fmt yuv420p -an -y ${out}`;
-  }
+  log('🔇 الصوت ممنوع في مقاطع الأحاديث النبوية');
+  const cmd = `ffmpeg -loop 1 -i ${bg} -vf "${vf}" -t 12 -c:v libx264 -pix_fmt yuv420p -an -y ${out}`;
 
   log(`▶️ ${out}`);
   execSync(cmd, { stdio: 'inherit' });
-  log(`✅ تم: ${out} - ${hasNasheed ? 'مع النشيد' : 'صامت'}`);
+  log(`✅ تم: ${out} - صامت`);
 }
 
 create(process.argv[2] || 1);
