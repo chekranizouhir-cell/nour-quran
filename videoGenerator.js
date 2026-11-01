@@ -55,7 +55,7 @@ function getAudioDuration(audioPath) {
   return duration;
 }
 
-function validateVideo(videoPath) {
+function validateVideo(videoPath, { requireAudio = true } = {}) {
   if (!videoPath || !fs.existsSync(videoPath)) {
     throw new Error(`Video file does not exist: ${videoPath || '(missing path)'}`);
   }
@@ -69,7 +69,7 @@ function validateVideo(videoPath) {
       video.width !== 1080 || video.height !== 1920) {
     throw new Error('Generated video must contain 1080x1920 H.264 video in yuv420p format.');
   }
-  if (!audio || audio.codec_name !== 'aac') {
+  if (requireAudio && (!audio || audio.codec_name !== 'aac')) {
     throw new Error('Generated video must contain an AAC audio stream.');
   }
 
@@ -93,7 +93,8 @@ async function generateVideo({
   audioPath,
   outputPath,
   ayahSlides,
-  cover
+  cover,
+  muteAudio = false
 }) {
   if ((!ayahText && !cover) || !surahName ||
       (!cover && (ayahNumber === undefined || ayahNumber === null))) {
@@ -103,11 +104,11 @@ async function generateVideo({
       typeof cover.subtitle !== 'string' || !cover.subtitle.trim())) {
     throw new Error('A surah cover must contain a title and subtitle.');
   }
-  if (!audioPath || !fs.existsSync(audioPath)) {
+  if (!muteAudio && (!audioPath || !fs.existsSync(audioPath))) {
     throw new Error('A valid recitation audio file is required; silent videos are not generated.');
   }
 
-  const duration = getAudioDuration(audioPath);
+  const duration = muteAudio ? 12 : getAudioDuration(audioPath);
   const outputDir = path.join(__dirname, 'output');
   fs.mkdirSync(outputDir, { recursive: true });
 
@@ -231,7 +232,7 @@ async function generateVideo({
     await browser.close();
     browser = null;
 
-    console.log(`2. كنركب الفيديو مع الصوت (${duration.toFixed(2)} ثانية) بكوديك yuv420p...`);
+    console.log(`2. كنركب الفيديو ${muteAudio ? 'الصامت' : `مع الصوت (${duration.toFixed(2)} ثانية)`} بكوديك yuv420p...`);
     ffmpegStarted = true;
     const videoInputs = slides.flatMap((slide, index) => [
       '-loop', '1',
@@ -240,24 +241,29 @@ async function generateVideo({
       '-i', imagePaths[index]
     ]);
     const videoLabels = slides.map((_, index) => `[${index}:v]`).join('');
-    execFileSync(ffmpegInstaller.path, [
+    const ffmpegArgs = [
       '-y',
       ...videoInputs,
-      '-i', audioPath,
       '-filter_complex', `${videoLabels}concat=n=${slides.length}:v=1:a=0,scale=1080:1920[v]`,
-      '-map', '[v]', '-map', `${slides.length}:a:0`,
+      '-map', '[v]',
       '-c:v', 'libx264',
-      '-c:a', 'aac',
-      '-b:a', '192k',
       '-t', String(duration),
       '-r', '30',
       '-pix_fmt', 'yuv420p',
       '-movflags', '+faststart',
-      '-shortest',
-      videoPath
-    ], { stdio: 'inherit' });
+      '-shortest'
+    ];
 
-    validateVideo(videoPath);
+    if (!muteAudio) {
+      ffmpegArgs.push('-i', audioPath, '-map', `${slides.length}:a:0`, '-c:a', 'aac', '-b:a', '192k');
+    } else {
+      ffmpegArgs.push('-an');
+    }
+
+    ffmpegArgs.push(videoPath);
+    execFileSync(ffmpegInstaller.path, ffmpegArgs, { stdio: 'inherit' });
+
+    validateVideo(videoPath, { requireAudio: !muteAudio });
     console.log('✅ فيديو قرآني واجد:', videoPath);
     return videoPath;
   } catch (error) {
