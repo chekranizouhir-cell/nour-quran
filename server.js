@@ -9,7 +9,7 @@ const PORT = 3000;
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(__dirname));
 app.use('/output', express.static(path.join(__dirname, 'output')));
 
 app.get('/api/youtube/status', async (req,res)=>{
@@ -35,7 +35,7 @@ app.post('/api/auto/high-quality', async (req,res)=>{
 });
 
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 app.listen(PORT, () => {
