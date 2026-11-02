@@ -14,10 +14,11 @@ const QURAN_API = 'https://api.alquran.cloud/v1';
 const OUTPUT_DIR = path.join(__dirname, 'output');
 const DATA_DIR = path.join(__dirname, 'data');
 const MAX_FETCH_ATTEMPTS = 2;
-const MIN_SHORT_DURATION_SECONDS = 120;
-const MAX_SHORT_DURATION_SECONDS = 179;
+const MAX_SHORTS_AYAH_COUNT = 4;
+const MIN_SHORT_DURATION_SECONDS = 30;
+const MAX_SHORT_DURATION_SECONDS = 59;
+const TARGET_SHORT_DURATION_SECONDS = 45;
 const MAX_DURATION_PASSAGE_ATTEMPTS = 5;
-const MAX_DURATION_PASSAGE_AYAH_COUNT = 50;
 const SCHEDULE_TIME_ZONE = 'Asia/Riyadh';
 const SCHEDULE_CRONS = {
   '0 23 * * *': '00:00',
@@ -36,9 +37,7 @@ const FREE_RECITERS = [
 ];
 const BLACKLIST = [];
 
-function wait(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 async function fetchQuranUrl(url) {
   for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt += 1) {
@@ -49,9 +48,7 @@ async function fetchQuranUrl(url) {
       }
       return response.data.data;
     } catch (cause) {
-      if (attempt === MAX_FETCH_ATTEMPTS) {
-        throw new Error(`Could not fetch Quran data from ${url}`, { cause });
-      }
+      if (attempt === MAX_FETCH_ATTEMPTS) throw new Error(`Could not fetch Quran data from ${url}`, { cause });
       await wait(500 * attempt);
     }
   }
@@ -60,8 +57,8 @@ async function fetchQuranUrl(url) {
 
 function getRiyadhDateAndTime(date = new Date()) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
-    timeZone: SCHEDULE_TIME_ZONE,
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+    timeZone: SCHEDULE_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
   }).formatToParts(date).filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
   return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}` };
 }
@@ -146,20 +143,16 @@ async function downloadAudio(url, destination) {
     return { audioPath: destination, duration };
   } catch (cause) {
     await fs.promises.rm(temporary, { force: true });
-    if (isMissingFfprobe(cause)) throw cause;
     throw cause;
   }
 }
 
 async function downloadSurahAudio(surah, reciter = getDailyReciter()) {
-  if (!surah || !Number.isInteger(surah.number) || surah.number < 1 || surah.number > 114) {
-    throw new Error(`Unsupported surah number: ${surah && surah.number}`);
-  }
+  if (!surah || !Number.isInteger(surah.number) || surah.number < 1 || surah.number > 114) throw new Error(`Unsupported surah number: ${surah && surah.number}`);
   if (!getAvailableReciters().some(item => item.id === reciter.id)) throw new Error(`Unavailable reciter: ${reciter.id}`);
   const number = String(surah.number).padStart(3, '0');
   const destination = path.join(OUTPUT_DIR, `surah_audio_${reciter.id}_${number}.mp3`);
-  const { audioPath } = await downloadAudio(`${reciter.folder}${number}.mp3`, destination);
-  return audioPath;
+  return (await downloadAudio(`${reciter.folder}${number}.mp3`, destination)).audioPath;
 }
 
 async function getAyah(number = Math.floor(Math.random() * 6236) + 1) {
@@ -168,38 +161,32 @@ async function getAyah(number = Math.floor(Math.random() * 6236) + 1) {
     fetchQuranUrl(`${QURAN_API}/ayah/${number}/en.sahih`)
   ]);
   return {
-    number: arabic.number,
-    numberInSurah: arabic.numberInSurah,
-    surah: arabic.surah,
-    arabicText: String(arabic.text).replace(/[\u200B-\u200D\uFEFF]/g, '').trim(),
-    englishText: String(english.text).trim()
+    number: arabic.number, numberInSurah: arabic.numberInSurah, surah: arabic.surah,
+    arabicText: String(arabic.text).replace(/[\u200B-\u200D\uFEFF]/g, '').trim(), englishText: String(english.text).trim()
   };
 }
 
 async function getRandomAyahs(count = 1) {
-  if (!Number.isInteger(count) || count < 1 || count > 50) throw new Error(`Unsupported ayah count: ${count}`);
+  if (!Number.isInteger(count) || count < 1 || count > MAX_SHORTS_AYAH_COUNT) throw new Error(`Unsupported ayah count: ${count}`);
   const surahNumber = Math.floor(Math.random() * 114) + 1;
   const [arabic, english] = await Promise.all([
     fetchQuranUrl(`${QURAN_API}/surah/${surahNumber}/quran-uthmani`),
     fetchQuranUrl(`${QURAN_API}/surah/${surahNumber}/en.sahih`)
   ]);
-  if (!Array.isArray(arabic.ayahs) || !Array.isArray(english.ayahs) || arabic.ayahs.length !== english.ayahs.length) {
-    throw new Error(`Quran API returned invalid surah data for ${surahNumber}`);
-  }
+  if (!Array.isArray(arabic.ayahs) || !Array.isArray(english.ayahs) || arabic.ayahs.length !== english.ayahs.length) throw new Error(`Quran API returned invalid surah data for ${surahNumber}`);
   const actualCount = Math.min(count, arabic.ayahs.length);
   const start = Math.floor(Math.random() * (arabic.ayahs.length - actualCount + 1));
   return arabic.ayahs.slice(start, start + actualCount).map((ayah, index) => ({
     number: ayah.number, numberInSurah: ayah.numberInSurah, surah: arabic,
-    arabicText: ayah.text.replace(/[\u200B-\u200D\uFEFF]/g, '').trim(),
-    englishText: english.ayahs[start + index].text.trim()
+    arabicText: ayah.text.replace(/[\u200B-\u200D\uFEFF]/g, '').trim(), englishText: english.ayahs[start + index].text.trim()
   }));
 }
 
-async function getRandomAyahsForDuration(targetSeconds = 180) {
+async function getRandomAyahsForDuration(targetSeconds = TARGET_SHORT_DURATION_SECONDS) {
   if (!Number.isFinite(targetSeconds) || targetSeconds <= 0) throw new Error(`Unsupported target duration: ${targetSeconds}`);
-  return getRandomAyahs(Math.min(50, Math.max(1, Math.ceil(targetSeconds / 12))));
+  return getRandomAyahs(Math.min(MAX_SHORTS_AYAH_COUNT, Math.max(1, Math.ceil(targetSeconds / 12))));
 }
-async function getRandomAyahsSmart() { return getRandomAyahs(Math.floor(Math.random() * 4) + 1); }
+async function getRandomAyahsSmart() { return getRandomAyahs(Math.floor(Math.random() * MAX_SHORTS_AYAH_COUNT) + 1); }
 
 async function getRandomAyahPassageWithAudio(targetSeconds) {
   const dateHash = createHash('sha256').update(getRiyadhDateAndTime().date).digest().readUInt32BE(0);
@@ -212,15 +199,13 @@ async function getRandomAyahPassageWithAudio(targetSeconds) {
       fetchQuranUrl(`${QURAN_API}/surah/${surahNumber}/quran-uthmani`),
       fetchQuranUrl(`${QURAN_API}/surah/${surahNumber}/en.sahih`)
     ]);
-    if (!Array.isArray(arabic.ayahs) || !Array.isArray(english.ayahs) || arabic.ayahs.length !== english.ayahs.length) {
-      throw new Error(`Quran API returned invalid surah data for ${surahNumber}`);
-    }
-    const estimatedCount = Math.min(arabic.ayahs.length, Math.ceil(targetSeconds / 12));
+    if (!Array.isArray(arabic.ayahs) || !Array.isArray(english.ayahs) || arabic.ayahs.length !== english.ayahs.length) throw new Error(`Quran API returned invalid surah data for ${surahNumber}`);
+    const estimatedCount = Math.min(MAX_SHORTS_AYAH_COUNT, arabic.ayahs.length, Math.ceil(targetSeconds / 12));
     const start = Math.floor(Math.random() * (arabic.ayahs.length - estimatedCount + 1));
     const passage = [];
     let totalDuration = 0;
     try {
-      for (let index = start; index < arabic.ayahs.length && passage.length < MAX_DURATION_PASSAGE_AYAH_COUNT; index += 1) {
+      for (let index = start; index < arabic.ayahs.length && passage.length < MAX_SHORTS_AYAH_COUNT; index += 1) {
         const ayah = arabic.ayahs[index];
         const surah = String(surahNumber).padStart(3, '0');
         const ayahNumber = String(ayah.numberInSurah).padStart(3, '0');
@@ -245,10 +230,10 @@ async function getRandomAyahPassageWithAudio(targetSeconds) {
     if (totalDuration < MIN_SHORT_DURATION_SECONDS || !passage.length) continue;
     const candidate = { ayahs: passage, totalDuration, reciter };
     if (!best || Math.abs(targetSeconds - totalDuration) < Math.abs(targetSeconds - best.totalDuration)) best = candidate;
-    if (Math.abs(targetSeconds - totalDuration) <= 12) return candidate;
+    if (Math.abs(targetSeconds - totalDuration) <= 8) return candidate;
   }
   if (best) return best;
-  throw new Error('Could not find a Quran passage with valid audio between 120 and 179 seconds.', { cause: lastError });
+  throw new Error(`Could not find a Quran passage with audio between ${MIN_SHORT_DURATION_SECONDS} and ${MAX_SHORT_DURATION_SECONDS} seconds.`, { cause: lastError });
 }
 
 async function generateArabicNarration(text) {
@@ -282,17 +267,14 @@ async function generateTextVideoAndUpload(type, privacy) {
   } catch (error) {
     console.warn('تعذر إنشاء الفيديو الصامت؛ سنستخدم تعليقاً صوتياً بديلاً.', error);
     const audioPath = await generateArabicNarration(entry.text);
-    try {
-      filePath = await generateVideo({ ...options, audioPath, muteAudio: false });
-    } finally {
-      await fs.promises.rm(audioPath, { force: true });
-    }
+    try { filePath = await generateVideo({ ...options, audioPath, muteAudio: false }); }
+    finally { await fs.promises.rm(audioPath, { force: true }); }
   }
   return getYoutubeStatus({ filePath, ...getTextMetadata(type, entry), privacy, requireAudio: false });
 }
 
 async function generateShortQuranVideoAndUpload(privacy) {
-  const targetSeconds = Math.floor(Math.random() * 60) + MIN_SHORT_DURATION_SECONDS;
+  const targetSeconds = Math.floor(Math.random() * (MAX_SHORT_DURATION_SECONDS - MIN_SHORT_DURATION_SECONDS + 1)) + MIN_SHORT_DURATION_SECONDS;
   const { ayahs, totalDuration, reciter } = await getRandomAyahPassageWithAudio(targetSeconds);
   const first = ayahs[0];
   const last = ayahs[ayahs.length - 1];
@@ -301,10 +283,7 @@ async function generateShortQuranVideoAndUpload(privacy) {
   try {
     const inputs = ayahs.flatMap(ayah => ['-i', ayah.audioPath]);
     const audioLabels = ayahs.map((_, index) => `[${index}:a]`).join('');
-    await execFileAsync(ffmpegInstaller.path, [
-      '-y', ...inputs, '-filter_complex', `${audioLabels}concat=n=${ayahs.length}:v=0:a=1[out]`,
-      '-map', '[out]', '-c:a', 'libmp3lame', '-q:a', '2', combinedAudioPath
-    ], { maxBuffer: 20 * 1024 * 1024 });
+    await execFileAsync(ffmpegInstaller.path, ['-y', ...inputs, '-filter_complex', `${audioLabels}concat=n=${ayahs.length}:v=0:a=1[out]`, '-map', '[out]', '-c:a', 'libmp3lame', '-q:a', '2', combinedAudioPath], { maxBuffer: 20 * 1024 * 1024 });
     getAudioDuration(combinedAudioPath);
     const ayahNumber = `${first.numberInSurah}-${last.numberInSurah}`;
     const ayahText = ayahs.map(ayah => ayah.arabicText).join(' ۞ ');
@@ -335,10 +314,7 @@ async function autoGenerateAndUpload({ privacy = 'private', ayahCount, targetDur
   if (!Array.isArray(surah.ayahs) || !surah.ayahs.length) throw new Error(`Invalid Quran API response for surah ${surahNumber}`);
   const reciter = getDailyReciter();
   const audioPath = await downloadSurahAudio({ number: surahNumber }, reciter);
-  const filePath = await generateVideo({
-    surahName: surah.name, ayahNumber: 1, audioPath,
-    cover: { title: `سورة ${surah.name}`, subtitle: `تلاوة كاملة بصوت ${reciter.name}` }
-  });
+  const filePath = await generateVideo({ surahName: surah.name, ayahNumber: 1, audioPath, cover: { title: `سورة ${surah.name}`, subtitle: `تلاوة كاملة بصوت ${reciter.name}` } });
   const title = Array.from(`تلاوة كاملة من سورة ${surah.name} بصوت ${reciter.name} | القرآن الكريم`).slice(0, 100).join('');
   return getYoutubeStatus({
     filePath, title,
@@ -348,18 +324,8 @@ async function autoGenerateAndUpload({ privacy = 'private', ayahCount, targetDur
 }
 
 module.exports = {
-  autoGenerateAndUpload,
-  downloadSurahAudio,
-  getAyah,
-  getRandomAyahs,
-  getRandomAyahsForDuration,
-  getRandomAyahsSmart,
-  getAvailableReciters,
-  getDailyReciter,
-  getScheduledContentType,
-  getRandomTextEntry,
-  isYoutubeConfigured,
-  FREE_RECITERS,
-  BLACKLIST,
-  scheduleCrons: Object.keys(SCHEDULE_CRONS)
+  autoGenerateAndUpload, downloadSurahAudio, getAyah, getRandomAyahs,
+  getRandomAyahsForDuration, getRandomAyahsSmart, getAvailableReciters,
+  getDailyReciter, getScheduledContentType, getRandomTextEntry, isYoutubeConfigured,
+  FREE_RECITERS, BLACKLIST, scheduleCrons: Object.keys(SCHEDULE_CRONS)
 };
