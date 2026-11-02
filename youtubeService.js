@@ -63,8 +63,7 @@ async function getYoutubeStatus(options = {}) {
 async function uploadToYoutube(options = {}) {
   requireYoutubeConfiguration();
 
-  if (!options.title || !options.description || !Array.isArray(options.tags) ||
-      options.tags.length === 0) {
+  if (!options.title || !options.description || !Array.isArray(options.tags) || options.tags.length === 0) {
     throw new Error('A meaningful title, description, and at least one tag are required for upload.');
   }
   if (/test codec|تجربة/i.test(`${options.title}\n${options.description}`)) {
@@ -81,7 +80,9 @@ async function uploadToYoutube(options = {}) {
   if (!fileStats.isFile() || fileStats.size === 0) {
     throw new Error(`Video file is empty or is not a regular file: ${filePath}`);
   }
-  validateVideo(filePath);
+
+  // Silent hadith/adhkar videos are allowed only when the caller explicitly opts in.
+  validateVideo(filePath, { requireAudio: options.requireAudio !== false });
 
   const privacyStatus = options.privacyStatus || options.privacy || 'private';
   if (!['private', 'unlisted', 'public'].includes(privacyStatus)) {
