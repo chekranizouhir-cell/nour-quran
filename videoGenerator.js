@@ -241,23 +241,42 @@ async function generateVideo({
       '-i', imagePaths[index]
     ]);
     const videoLabels = slides.map((_, index) => `[${index}:v]`).join('');
-    const ffmpegArgs = [
-      '-y',
-      ...videoInputs,
-      '-filter_complex', `${videoLabels}concat=n=${slides.length}:v=1:a=0,scale=1080:1920[v]`,
-      '-map', '[v]',
-      '-c:v', 'libx264',
-      '-t', String(duration),
-      '-r', '30',
-      '-pix_fmt', 'yuv420p',
-      '-movflags', '+faststart',
-      '-shortest'
-    ];
+
+    const ffmpegArgs = ['-y', ...videoInputs];
 
     if (!muteAudio) {
-      ffmpegArgs.push('-i', audioPath, '-map', `${slides.length}:a:0`, '-c:a', 'aac', '-b:a', '192k');
+      ffmpegArgs.push('-i', audioPath);
+    }
+
+    ffmpegArgs.push(
+      '-filter_complex',
+      `${videoLabels}concat=n=${slides.length}:v=1:a=0,scale=1080:1920[v]`
+    );
+
+    if (!muteAudio) {
+      ffmpegArgs.push(
+        '-map', '[v]',
+        '-map', `${slides.length}:a:0`,
+        '-c:v', 'libx264',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-t', String(duration),
+        '-r', '30',
+        '-pix_fmt', 'yuv420p',
+        '-movflags', '+faststart',
+        '-shortest'
+      );
     } else {
-      ffmpegArgs.push('-an');
+      ffmpegArgs.push(
+        '-map', '[v]',
+        '-c:v', 'libx264',
+        '-an',
+        '-t', String(duration),
+        '-r', '30',
+        '-pix_fmt', 'yuv420p',
+        '-movflags', '+faststart',
+        '-shortest'
+      );
     }
 
     ffmpegArgs.push(videoPath);
