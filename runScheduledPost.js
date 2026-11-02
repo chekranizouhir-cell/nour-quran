@@ -4,7 +4,7 @@ async function runScheduledPost() {
   const schedule = process.env.GITHUB_EVENT_SCHEDULE;
   const scheduledType = getScheduledContentType(schedule);
   const type = scheduledType === 'quran'
-    ? process.env.QURAN_VIDEO_TYPE || 'quran-short'
+    ? process.env.QURAN_VIDEO_TYPE || 'quran-full'
     : scheduledType;
   if (!isYoutubeConfigured()) {
     throw new Error(
