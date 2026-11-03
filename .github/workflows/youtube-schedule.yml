@@ -2,9 +2,13 @@ name: Nour Quran Auto Poster
 
 on:
   schedule:
-    - cron: '0 23,5,9,13,17,21 * * *' # 00:00, 06:00, 10:00, 14:00, 18:00, 22:00 Morocco time (UTC+1)
+    - cron: '0 23 * * *'
+    - cron: '0 5 * * *'
+    - cron: '0 9 * * *'
+    - cron: '0 13 * * *'
+    - cron: '0 17 * * *'
+    - cron: '0 21 * * *'
   workflow_dispatch:
-
 jobs:
   post:
     runs-on: ubuntu-latest
